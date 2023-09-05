@@ -5,7 +5,7 @@ A tool for converting Sympy expressions to a Pytensor graph, with support for in
 # Installation
 
 ```text
-pip install pytensor_sympy_printer
+pip install sympytensor
 ```
 
 # Examples
@@ -13,7 +13,7 @@ pip install pytensor_sympy_printer
 ## Writing expressions to pytensor
 Two functions are provided to convert sympy expressions:
 
-- `pytensor_code` converts a sympy expression to a `pytensor` symbolic graph
+- `as_tensor` converts a sympy expression to a `pytensor` symbolic graph
 - `pytensor_function` returns a compiled `pytensor.function` that computes the expression. Keyword arguments to
 `pytensor.function` can be provided as `**kwargs`
 
@@ -152,5 +152,4 @@ with pm.Model() as m:
     c_pm = pm.Normal('c')
     c_pm = pm.Normal('d')
     A_inv_pm = SympyDeterministic('A_inv', A_inv)
-
 ```
