@@ -1,6 +1,6 @@
-# Pytensor Printer
+# Sympytensor
 
-A tool for converting Sympy expressions to a Pytensor graph, with support for inserting PyMC model variables.
+A tool for converting Sympy expressions to a Pytensor graph, with support for working with PyMC models.
 
 # Installation
 
