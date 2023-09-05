@@ -14,7 +14,7 @@ pip install pytensor_sympy_printer
 Two functions are provided to convert sympy expressions:
 
 - `pytensor_code` converts a sympy expression to a `pytensor` symbolic graph
-- `pytensor_function` returns a compiled `pytensor.function` that computes the expression. Keyword arguments to 
+- `pytensor_function` returns a compiled `pytensor.function` that computes the expression. Keyword arguments to
 `pytensor.function` can be provided as `**kwargs`
 
 Use sympy to compute 1d splines, then convert the splines to a symbolic pytensor variable:
@@ -22,14 +22,14 @@ Use sympy to compute 1d splines, then convert the splines to a symbolic pytensor
 ```python
 import pytensor
 import sympy as sp
-from pytensor_printer import pytensor_code
+from sympytensor import as_tensor
 from sympy.abc import x
 
-x_data = [0,1,2,3,4,5]
-y_data =  [3,6,5,7,9,1]
+x_data = [0, 1, 2, 3, 4, 5]
+y_data = [3, 6, 5, 7, 9, 1]
 
 s = sp.interpolating_spline(d=3, x=x, X=x_data, Y=y_data)
-s_pt = pytensor_code(s)
+s_pt = as_tensor(s)
 ```
 
 This generates the following function graph:
@@ -130,14 +130,14 @@ pytensor.dprint(s_pt)
 
 ## Inserting PyMC random variables into an expression
 
-The `SympyDeterministic` function works as a drop-in replacement for pm.Deterministic, except a `sympy` expression is 
-expected. It will automatically search the active model context for random variables corresponding to symbols in the 
-expression and make substitutions. 
+The `SympyDeterministic` function works as a drop-in replacement for pm.Deterministic, except a `sympy` expression is
+expected. It will automatically search the active model context for random variables corresponding to symbols in the
+expression and make substitutions.
 
 Here is an example using sympy to symbolically compute the inverse of a matrix, which is then used in a model:
 
 ```python
-from pytensor_printer import SympyDeterministic
+from sympytensor import SympyDeterministic
 import pymc as pm
 import sympy as sp
 from sympy.abc import a, b, c, d
@@ -152,6 +152,5 @@ with pm.Model() as m:
     c_pm = pm.Normal('c')
     c_pm = pm.Normal('d')
     A_inv_pm = SympyDeterministic('A_inv', A_inv)
-        
-```
 
+```

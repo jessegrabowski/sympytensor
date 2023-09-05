@@ -1,22 +1,21 @@
-import pytest
-
-from pytensor_printer.pymc_printing import _match_cache_to_rvs
-from pytensor_printer import SympyDeterministic, pytensor_code
-
-import sympy as sp
 import pymc as pm
-from numpy.testing import assert_allclose
 import pytensor.tensor as pt
+import pytest
+import sympy as sp
+from numpy.testing import assert_allclose
+
+from sympytensor import SympyDeterministic, as_tensor
+from sympytensor.pymc import _match_cache_to_rvs
 
 
 def test_match_rvs_to_symbols_simple():
-    x_sp = sp.Symbol('x')
+    x_sp = sp.Symbol("x")
     y_sp = x_sp + 1
 
     with pm.Model():
-        x_pm = pm.Normal('x')
+        x_pm = pm.Normal("x")
         cache = {}
-        y_pm = pytensor_code(y_sp, cache=cache)
+        y_pm = as_tensor(y_sp, cache=cache)
         sub_dict = _match_cache_to_rvs(cache)
 
     pymc_vars = [x_pm]
@@ -25,31 +24,33 @@ def test_match_rvs_to_symbols_simple():
 
 
 def test_make_sympy_deterministic_simple():
-    x_sp = sp.Symbol('x')
+    x_sp = sp.Symbol("x")
     y_sp = x_sp + 1
 
     with pm.Model():
-        x_pm = pm.Normal('x')
-        y_pm = SympyDeterministic('y', y_sp)
+        x_pm = pm.Normal("x")
+        y_pm = SympyDeterministic("y", y_sp)
 
     assert_allclose(*pm.draw([y_pm, x_pm + 1], 10))
 
 
 def test_make_sympy_deterministic_raises_if_missing_inputs():
-    x_sp = sp.Symbol('x')
-    z_sp = sp.Symbol('z')
+    x_sp = sp.Symbol("x")
+    z_sp = sp.Symbol("z")
     y_sp = x_sp + z_sp
 
     with pm.Model():
-        x_pm = pm.Normal('x')
-        with pytest.raises(ValueError, match='The following symbols were found in the provided sympy expression'):
-            y_pm = SympyDeterministic('y', y_sp)
+        x_pm = pm.Normal("x")
+        with pytest.raises(
+            ValueError, match="The following symbols were found in the provided sympy expression"
+        ):
+            y_pm = SympyDeterministic("y", y_sp)
 
 
 def test_make_sympy_deterministic_complex():
     # Very simple linear model
-    variables = x_s, x_d, P, P_e, M_d, M_s = sp.symbols('x_s x_d P P_e M_d M_s')
-    params = a, b, c, d, P_e_bar, tau = sp.symbols(r'a b c d P_e_bar tau')
+    variables = x_s, x_d, P, P_e, M_d, M_s = sp.symbols("x_s x_d P P_e M_d M_s")
+    params = a, b, c, d, P_e_bar, tau = sp.symbols(r"a b c d P_e_bar tau")
 
     equations = [
         P - a * x_s - b,
@@ -57,7 +58,7 @@ def test_make_sympy_deterministic_complex():
         M_d - x_d + x_s,
         P_e - P_e_bar,
         M_d - M_s,
-        P - (1 + tau) * P_e
+        P - (1 + tau) * P_e,
     ]
 
     # Solve by putting it into reduced row-echelon form
@@ -67,17 +68,17 @@ def test_make_sympy_deterministic_complex():
 
     # Solutions are in the last column
     model = A_rref[:, -1]
-    coords = {'variable':['x_s', 'x_d', 'P', 'P_e', 'M_d', 'M_s']}
+    coords = {"variable": ["x_s", "x_d", "P", "P_e", "M_d", "M_s"]}
 
     with pm.Model(coords=coords) as m:
-        a = pm.Normal('a')
-        b = pm.Normal('b')
-        c = pm.Normal('c')
-        d = pm.Normal('d')
-        P_e_bar = pm.Normal('P_e_bar')
-        tau = pm.Normal('tau')
+        a = pm.Normal("a")
+        b = pm.Normal("b")
+        c = pm.Normal("c")
+        d = pm.Normal("d")
+        P_e_bar = pm.Normal("P_e_bar")
+        tau = pm.Normal("tau")
 
-        y = SympyDeterministic('y', model, dims=['variable'])
+        y = SympyDeterministic("y", model, dims=["variable"])
         prior = pm.sample_prior_predictive()
 
     *param_draw, y_draw = pm.draw([a, b, c, d, P_e_bar, tau, y])
@@ -89,16 +90,15 @@ def test_make_sympy_deterministic_complex():
 def test_sympy_deterministic_linalg():
     from sympy.abc import a, b, c, d
 
-    A = sp.Matrix([[a, b],
-                   [c, d]])
+    A = sp.Matrix([[a, b], [c, d]])
     A_inv = sp.matrices.Inverse(A).doit()
     with pm.Model():
-        a_pm = pm.Normal('a')
-        b_pm = pm.Normal('b')
-        c_pm = pm.Normal('c')
-        d_pm = pm.Normal('d')
+        a_pm = pm.Normal("a")
+        b_pm = pm.Normal("b")
+        c_pm = pm.Normal("c")
+        d_pm = pm.Normal("d")
         A_pt = pt.stack([pt.stack([a_pm, b_pm]), pt.stack([c_pm, d_pm])])
-        A_inv_pm = SympyDeterministic('A_inv', A_inv)
+        A_inv_pm = SympyDeterministic("A_inv", A_inv)
         A_inv_pt = pt.linalg.inv(A_pt)
 
     assert_allclose(*pm.draw([A_inv_pm, A_inv_pt]))

@@ -1,0 +1,31 @@
+[tool.pytest.ini_options]
+minversion = "6.0"
+xfail_strict=true
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning"]
+
+[tool.isort]
+profile = 'black'
+
+[tool.black]
+line-length = 100
+
+[tool.nbqa.mutate]
+isort = 1
+black = 1
+pyupgrade = 1
+
+[tool.bumpver]
+current_version = "1.0.0"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit_message  = "Bump version {old_version} -> {new_version}"
+commit          = true
+tag             = true
+push            = false
+
+[tool.bumpver.file_patterns]
+"pyproject.toml" = ['current_version = "{version}"']
+"setup.cfg" = ['version = {version}']
+"sympytensor/__init__.py" = ["{version}"]

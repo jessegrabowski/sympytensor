@@ -1,6 +1,7 @@
 import pymc as pm
-from pytensor_printer.printing import pytensor_code
 import pytensor
+
+from sympytensor.pytensor import as_tensor
 
 
 def _match_cache_to_rvs(cache, model=None):
@@ -21,10 +22,8 @@ def _match_cache_to_rvs(cache, model=None):
     if len(missing_params) > 0:
         raise ValueError(
             "The following symbols were found in the provided sympy expression, but are not found among model "
-            "variables or deterministics: "
-            + ", ".join(missing_params)
+            "variables or deterministics: " + ", ".join(missing_params)
         )
-
 
     return sub_dict
 
@@ -33,7 +32,7 @@ def SympyDeterministic(name, expr, model=None, dims=None):
     model = pm.modelcontext(model)
     cache = {}
 
-    pytensor_expr = pytensor_code(expr, cache=cache)
+    pytensor_expr = as_tensor(expr, cache=cache)
     replace_dict = _match_cache_to_rvs(cache, model)
 
     pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)

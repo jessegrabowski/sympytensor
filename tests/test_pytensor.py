@@ -1,35 +1,34 @@
 import re
 
-import pytest
 import numpy as np
-
 import pytensor
 import pytensor.tensor as pt
-from pytensor.scalar.basic import ScalarType
+import pytest
 from pytensor.graph.basic import Variable
-from pytensor.tensor.var import TensorVariable
-from pytensor.tensor.elemwise import Elemwise, DimShuffle
+from pytensor.scalar.basic import ScalarType
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
+from pytensor.tensor.var import TensorVariable
 
-xt, yt, zt = [pt.scalar(name, dtype='floatX') for name in 'xyz']
-Xt, Yt, Zt = [pt.tensor(n, dtype='floatX', shape=(None, None)) for n in 'XYZ']
+xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
+Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
 
 import sympy as sp
+from sympy.abc import t, x, y, z
 from sympy.core.singleton import S
-from sympy.abc import x, y, z, t
-from pytensor_printer.printing import dim_handling, pytensor_code, pytensor_function
 
+from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function
 
 # Default set of matrix symbols for testing - make square so we can both
 # multiply and perform elementwise operations between them.
-X, Y, Z = [sp.MatrixSymbol(n, 4, 4) for n in 'XYZ']
+X, Y, Z = (sp.MatrixSymbol(n, 4, 4) for n in "XYZ")
 
 # For testing AppliedUndef
-f_t = sp.Function('f')(t)
+f_t = sp.Function("f")(t)
 
 
 def fgraph_of(*exprs):
-    """ Transform SymPy expressions into Pytensor Computation.
+    """Transform SymPy expressions into Pytensor Computation.
 
     Parameters
     ==========
@@ -41,14 +40,14 @@ def fgraph_of(*exprs):
     pytensor.graph.fg.FunctionGraph
     """
 
-    outs = list(map(pytensor_code, exprs))
+    outs = list(map(as_tensor, exprs))
     ins = list(pytensor.graph.basic.graph_inputs(outs))
     ins, outs = pytensor.graph.basic.clone(ins, outs)
     return pytensor.graph.fg.FunctionGraph(ins, outs)
 
 
 def pytensor_simplify(fgraph):
-    """ Simplify a Pytensor Computation.
+    """Simplify a Pytensor Computation.
 
     Parameters
     ==========
@@ -65,7 +64,7 @@ def pytensor_simplify(fgraph):
 
 
 def pt_eq(a, b):
-    """ Test two Pytensor objects for equality.
+    """Test two Pytensor objects for equality.
 
     Also accepts numeric types and lists/tuples of supported types.
 
@@ -97,40 +96,39 @@ def pt_eq(a, b):
         return list(map(pt_eq, a)) == list(map(pt_eq, b))
 
     # Otherwise, assume debugprint() can handle it
-    astr = pytensor.printing.debugprint(a, file='str')
-    bstr = pytensor.printing.debugprint(b, file='str')
+    astr = pytensor.printing.debugprint(a, file="str")
+    bstr = pytensor.printing.debugprint(b, file="str")
 
     # Check for bug mentioned above
-    for argname, argval, argstr in [('a', a, astr), ('b', b, bstr)]:
-        if argstr == '':
+    for argname, argval, argstr in [("a", a, astr), ("b", b, bstr)]:
+        if argstr == "":
             raise TypeError(
-                'aesara.printing.debugprint(%s) returned empty string '
-                '(%s is instance of %r)'
-                % (argname, argname, type(argval))
+                "aesara.printing.debugprint(%s) returned empty string "
+                "(%s is instance of %r)" % (argname, argname, type(argval))
             )
 
     return astr == bstr
 
 
-@pytest.mark.parametrize('pt_obj, sp_obj', zip([xt, yt, zt, Xt, Yt, Zt], [x, y, z, X, Y, Z]))
+@pytest.mark.parametrize("pt_obj, sp_obj", zip([xt, yt, zt, Xt, Yt, Zt], [x, y, z, X, Y, Z]))
 def test_example_symbols(pt_obj, sp_obj):
     """
     Check that the example symbols in this module print to their Aesara
     equivalents, as many of the other tests depend on this.
     """
-    assert pt_eq(pt_obj, pytensor_code(sp_obj))
+    assert pt_eq(pt_obj, as_tensor(sp_obj))
 
 
 def test_Symbol():
-    """ Test printing a Symbol to a pytensor variable. """
-    xx = pytensor_code(x, broadcastables={x: ()})
+    """Test printing a Symbol to a pytensor variable."""
+    xx = as_tensor(x, broadcastables={x: ()})
     assert xx.broadcastable == ()
     assert xx.name == x.name
 
 
 def test_MatrixSymbol():
-    """ Test printing a MatrixSymbol to a aesara variable. """
-    XX = pytensor_code(X)
+    """Test printing a MatrixSymbol to a aesara variable."""
+    XX = as_tensor(X)
     assert isinstance(XX, TensorVariable)
     assert XX.type.broadcastable == (False, False)
 
@@ -144,55 +142,55 @@ def test_MatrixSymbol():
 
 
 def test_AppliedUndef():
-    """ Test printing AppliedUndef instance, which works similarly to Symbol. """
-    ftt = pytensor_code(f_t)
+    """Test printing AppliedUndef instance, which works similarly to Symbol."""
+    ftt = as_tensor(f_t)
     assert isinstance(ftt, TensorVariable)
     assert ftt.broadcastable == ()
-    assert ftt.name == 'f_t'
+    assert ftt.name == "f_t"
 
 
 def test_add():
     expr = x + y
-    comp = pytensor_code(expr)
+    comp = as_tensor(expr)
     assert comp.owner.op == pytensor.tensor.add
 
 
-@pytest.mark.parametrize('f_sp, f_pt', [(sp.sin, pt.sin), (sp.tan, pt.tan)], ids=['sin', 'tan'])
+@pytest.mark.parametrize("f_sp, f_pt", [(sp.sin, pt.sin), (sp.tan, pt.tan)], ids=["sin", "tan"])
 def test_trig(f_sp, f_pt):
-    assert pt_eq(pytensor_code(f_sp(x)), f_pt(xt))
+    assert pt_eq(as_tensor(f_sp(x)), f_pt(xt))
 
 
 def test_complex_expression():
-    """ Test printing a complex expression with multiple symbols. """
-    expr = sp.exp(x ** 2 + sp.cos(y)) * sp.log(2 * z)
-    comp = pytensor_code(expr)
-    expected = pt.exp(xt ** 2 + pt.cos(yt)) * pt.log(2 * zt)
+    """Test printing a complex expression with multiple symbols."""
+    expr = sp.exp(x**2 + sp.cos(y)) * sp.log(2 * z)
+    comp = as_tensor(expr)
+    expected = pt.exp(xt**2 + pt.cos(yt)) * pt.log(2 * zt)
     assert pt_eq(comp, expected)
 
 
-@pytest.mark.parametrize('dtype', ['float32', 'float64', 'int8', 'int16', 'int32', 'int64'])
+@pytest.mark.parametrize("dtype", ["float32", "float64", "int8", "int16", "int32", "int64"])
 def test_dtype(dtype):
-    """ Test specifying specific data types through the dtype argument. """
-    assert pytensor_code(x, dtypes={x: dtype}).type.dtype == dtype
+    """Test specifying specific data types through the dtype argument."""
+    assert as_tensor(x, dtypes={x: dtype}).type.dtype == dtype
 
 
 def test_floatX_dtype():
-    assert pytensor_code(x, dtypes={x: 'floatX'}).type.dtype in ('float32', 'float64')
+    assert as_tensor(x, dtypes={x: "floatX"}).type.dtype in ("float32", "float64")
 
 
 def test_type_promotion_simple():
-    assert pytensor_code(x + 1, dtypes={x: 'float32'}).type.dtype == 'float32'
+    assert as_tensor(x + 1, dtypes={x: "float32"}).type.dtype == "float32"
 
 
 def test_type_promotion_mixed():
-    assert pytensor_code(x + y, dtypes={x: 'float64', y: 'float32'}).type.dtype == 'float64'
+    assert as_tensor(x + y, dtypes={x: "float64", y: "float32"}).type.dtype == "float64"
 
 
-@pytest.mark.parametrize('bc', [(False,), (True,), (False, False), (True, False)])
-@pytest.mark.parametrize('s', [x, f_t])
+@pytest.mark.parametrize("bc", [(False,), (True,), (False, False), (True, False)])
+@pytest.mark.parametrize("s", [x, f_t])
 def test_broadcastables(bc, s):
     # TODO: Matrix broadcasting?
-    assert pytensor_code(s, broadcastables={s: bc}, cache={}).broadcastable == bc
+    assert as_tensor(s, broadcastables={s: bc}, cache={}).broadcastable == bc
 
 
 cases = [
@@ -204,49 +202,51 @@ cases = [
 ]
 
 
-@pytest.mark.parametrize('bc1, bc2, bc3', cases)
+@pytest.mark.parametrize("bc1, bc2, bc3", cases)
 def test_broadcasting(bc1, bc2, bc3):
-    """ Test "broadcastable" attribute after applying element-wise binary op. """
+    """Test "broadcastable" attribute after applying element-wise binary op."""
     expr = x + y
-    comp = pytensor_code(expr, broadcastables={x: bc1, y: bc2})
+    comp = as_tensor(expr, broadcastables={x: bc1, y: bc2})
     assert comp.broadcastable == bc3
 
 
 def test_MatMul():
     expr = X * Y * Z
-    expr_t = pytensor_code(expr)
+    expr_t = as_tensor(expr)
     assert isinstance(expr_t.owner.op, Dot)
     assert pt_eq(expr_t, Xt.dot(Yt).dot(Zt))
 
 
 def test_Transpose():
-    assert isinstance(pytensor_code(X.T).owner.op, DimShuffle)
+    assert isinstance(as_tensor(X.T).owner.op, DimShuffle)
 
 
 def test_MatAdd():
     expr = X + Y + Z
-    assert isinstance(pytensor_code(expr).owner.op, Elemwise)
+    assert isinstance(as_tensor(expr).owner.op, Elemwise)
 
 
 def test_Rationals():
-    assert pt_eq(pytensor_code(sp.Integer(2) / 3), pt.true_div(2, 3))
-    assert pt_eq(pytensor_code(S.Half), pt.true_div(1, 2))
+    assert pt_eq(as_tensor(sp.Integer(2) / 3), pt.true_div(2, 3))
+    assert pt_eq(as_tensor(S.Half), pt.true_div(1, 2))
 
 
 def test_Integers():
-    assert pytensor_code(sp.Integer(3)) == 3
+    assert as_tensor(sp.Integer(3)) == 3
 
 
 def test_factorial():
-    n = sp.Symbol('n')
-    assert pytensor_code(sp.factorial(n))
+    n = sp.Symbol("n")
+    assert as_tensor(sp.factorial(n))
 
 
-@pytest.mark.filterwarnings('ignore: A Supervisor feature is missing')
+@pytest.mark.filterwarnings("ignore: A Supervisor feature is missing")
 def test_Derivative():
     simp = lambda expr: pytensor_simplify(fgraph_of(expr))
-    assert pt_eq(simp(pytensor_code(sp.Derivative(sp.sin(x), x, evaluate=False))),
-                 simp(pytensor.grad(pt.sin(xt), xt)))
+    assert pt_eq(
+        simp(as_tensor(sp.Derivative(sp.sin(x), x, evaluate=False))),
+        simp(pytensor.grad(pt.sin(xt), xt)),
+    )
 
 
 def test_pytensor_function_single_output():
@@ -262,18 +262,16 @@ def test_pytensor_function_multiple_outputs():
 
 
 def test_pytensor_function_matches_numpy():
-    f = pytensor_function([x, y], [x + y], dim=1,
-                          dtypes={x: 'float64', y: 'float64'})
+    f = pytensor_function([x, y], [x + y], dim=1, dtypes={x: "float64", y: "float64"})
     assert np.linalg.norm(f([1, 2], [3, 4]) - np.asarray([4, 6])) < 1e-9
 
-    f = pytensor_function([x, y], [x + y], dtypes={x: 'float64', y: 'float64'},
-                          dim=1)
-    xx = np.arange(3).astype('float64')
-    yy = 2 * np.arange(3).astype('float64')
+    f = pytensor_function([x, y], [x + y], dtypes={x: "float64", y: "float64"}, dim=1)
+    xx = np.arange(3).astype("float64")
+    yy = 2 * np.arange(3).astype("float64")
     assert np.linalg.norm(f(xx, yy) - 3 * np.arange(3)) < 1e-9
 
 
-@pytest.mark.parametrize('n_out, scalar', [(1, True), (1, False), (2, False)])
+@pytest.mark.parametrize("n_out, scalar", [(1, True), (1, False), (2, False)])
 def test_pytensor_matrix_funciton_matches_numpy(n_out, scalar):
     m = sp.Matrix([[x, y], [z, x + y + z]])
     expected = np.array([[1.0, 2.0], [3.0, 1.0 + 2.0 + 3.0]])
@@ -288,21 +286,29 @@ def test_pytensor_matrix_funciton_matches_numpy(n_out, scalar):
 
 def test_dim_handling():
     assert dim_handling([x], dim=2) == {x: (False, False)}
-    assert dim_handling([x, y], dims={x: 1, y: 2}) == {x: (False, True),
-                                                       y: (False, False)}
+    assert dim_handling([x, y], dims={x: 1, y: 2}) == {x: (False, True), y: (False, False)}
     assert dim_handling([x], broadcastables={x: (False,)}) == {x: (False,)}
 
 
-@pytest.mark.parametrize('kwargs, test_inputs, expected_result',
-                         [
-                             (dict(dim=1, on_unused_input='ignore', dtypes={x: 'float64', y: 'float64', z: 'float64'}),
-                              ([1, 2], [3, 4], [0, 0]),
-                              (np.asarray([4, 6]))),
-                             (dict(dtypes={x: 'float64', y: 'float64', z: 'float64'}, dim=1, on_unused_input='ignore'),
-                              ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
-                              (3 * np.arange(3)))
-                         ]
-                         )
+@pytest.mark.parametrize(
+    "kwargs, test_inputs, expected_result",
+    [
+        (
+            dict(
+                dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}
+            ),
+            ([1, 2], [3, 4], [0, 0]),
+            (np.asarray([4, 6])),
+        ),
+        (
+            dict(
+                dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"
+            ),
+            ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
+            (3 * np.arange(3)),
+        ),
+    ],
+)
 def test_addition_pytensor_kwargs_in_function_printer(kwargs, test_inputs, expected_result):
     f = pytensor_function([x, y, z], [x + y], **kwargs)
     assert np.linalg.norm(f(*test_inputs) - expected_result) < 1e-9
@@ -317,11 +323,14 @@ scalar_cases = [
 ]
 
 
-@pytest.mark.parametrize('inputs, outputs, in_dims, out_dims', scalar_cases,
-                         ids=['single 0d', 'single 2d', 'single 1d', 'two 0d', 'mixed'])
-@pytest.mark.parametrize('scalar', [False, True])
+@pytest.mark.parametrize(
+    "inputs, outputs, in_dims, out_dims",
+    scalar_cases,
+    ids=["single 0d", "single 2d", "single 1d", "two 0d", "mixed"],
+)
+@pytest.mark.parametrize("scalar", [False, True])
 def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
-    """ Test the "scalar" argument to aesara_function(). """
+    """Test the "scalar" argument to aesara_function()."""
     from pytensor.compile.function.types import Function
 
     f = pytensor_function(inputs, outputs, dims=in_dims, scalar=scalar)
@@ -356,15 +365,15 @@ def test_pytensor_function_raises_on_bad_kwarg():
     Passing an unknown keyword argument to aesara_function() should raise an
     exception.
     """
-    with pytest.raises(TypeError, match=re.escape('function() got an unexpected keyword argument')):
+    with pytest.raises(TypeError, match=re.escape("function() got an unexpected keyword argument")):
         pytensor_function([x], [x + 1], foobar=3)
 
 
 def test_slice():
-    assert pytensor_code(slice(1, 2, 3)) == slice(1, 2, 3)
+    assert as_tensor(slice(1, 2, 3)) == slice(1, 2, 3)
 
     def pt_eq_slice(s1, s2):
-        for attr in ['start', 'stop', 'step']:
+        for attr in ["start", "stop", "step"]:
             a1 = getattr(s1, attr)
             a2 = getattr(s2, attr)
             if a1 is None or a2 is None:
@@ -374,81 +383,83 @@ def test_slice():
                 return False
         return True
 
-    dtypes = {x: 'int32', y: 'int32'}
-    assert pt_eq_slice(pytensor_code(slice(x, y), dtypes=dtypes), slice(xt, yt))
-    assert pt_eq_slice(pytensor_code(slice(1, x, 3), dtypes=dtypes), slice(1, xt, 3))
+    dtypes = {x: "int32", y: "int32"}
+    assert pt_eq_slice(as_tensor(slice(x, y), dtypes=dtypes), slice(xt, yt))
+    assert pt_eq_slice(as_tensor(slice(1, x, 3), dtypes=dtypes), slice(1, xt, 3))
 
 
 def test_MatrixSlice():
     cache = {}
 
-    n = sp.Symbol('n', integer=True)
-    X = sp.MatrixSymbol('X', n, n)
+    n = sp.Symbol("n", integer=True)
+    X = sp.MatrixSymbol("X", n, n)
 
     Y = X[1:2:3, 4:5:6]
-    Yt = pytensor_code(Y, cache=cache)
+    Yt = as_tensor(Y, cache=cache)
 
-    s = ScalarType(dtype='int64')
+    s = ScalarType(dtype="int64")
     assert tuple(Yt.owner.op.idx_list) == (slice(s, s, s), slice(s, s, s))
-    assert Yt.owner.inputs[0] == pytensor_code(X, cache=cache)
+    assert Yt.owner.inputs[0] == as_tensor(X, cache=cache)
     assert all(Yt.owner.inputs[i].data == i for i in range(1, 7))
 
-    k = sp.Symbol('k')
+    k = sp.Symbol("k")
     start, stop, step = 4, k, 2
     Y = X[start:stop:step]
-    Yt = pytensor_code(Y, dtypes={n: 'int32', k: 'int32'})
-    assert Yt.owner.op.idx_list[0].stop == ScalarType('int32')
+    Yt = as_tensor(Y, dtypes={n: "int32", k: "int32"})
+    assert Yt.owner.op.idx_list[0].stop == ScalarType("int32")
 
 
 def test_BlockMatrix():
-    n = sp.Symbol('n', integer=True)
-    A, B, C, D = [sp.MatrixSymbol(name, n, n) for name in 'ABCD']
-    At, Bt, Ct, Dt = map(pytensor_code, (A, B, C, D))
+    n = sp.Symbol("n", integer=True)
+    A, B, C, D = (sp.MatrixSymbol(name, n, n) for name in "ABCD")
+    At, Bt, Ct, Dt = map(as_tensor, (A, B, C, D))
     Block = sp.BlockMatrix([[A, B], [C, D]])
-    Blockt = pytensor_code(Block)
-    solutions = [pt.join(0, pt.join(1, At, Bt), pt.join(1, Ct, Dt)),
-                 pt.join(1, pt.join(0, At, Ct), pt.join(0, Bt, Dt))]
+    Blockt = as_tensor(Block)
+    solutions = [
+        pt.join(0, pt.join(1, At, Bt), pt.join(1, Ct, Dt)),
+        pt.join(1, pt.join(0, At, Ct), pt.join(0, Bt, Dt)),
+    ]
     assert any(pt_eq(Blockt, solution) for solution in solutions)
 
 
 def test_DenseMatrix():
     from pytensor.tensor.basic import Join
 
-    t = sp.Symbol('theta')
+    t = sp.Symbol("theta")
     for MatrixType in [sp.Matrix, sp.ImmutableMatrix]:
         X = MatrixType([[sp.cos(t), -sp.sin(t)], [sp.sin(t), sp.cos(t)]])
-        tX = pytensor_code(X)
+        tX = as_tensor(X)
         assert isinstance(tX, TensorVariable)
         assert isinstance(tX.owner.op, Join)
 
 
 # Pairs of objects which should be considered equivalent with respect to caching
 pairs = [
-    (x, sp.Symbol('x')),
-    (X, sp.MatrixSymbol('X', *X.shape)),
-    (f_t, sp.Function('f')(sp.Symbol('t'))),
+    (x, sp.Symbol("x")),
+    (X, sp.MatrixSymbol("X", *X.shape)),
+    (f_t, sp.Function("f")(sp.Symbol("t"))),
 ]
 
 
-@pytest.mark.parametrize('s1, s2', pairs)
+@pytest.mark.parametrize("s1, s2", pairs)
 def test_cache_basic(s1, s2):
-    """ Test single symbol-like objects are cached when printed by themselves. """
+    """Test single symbol-like objects are cached when printed by themselves."""
     cache = {}
-    st = pytensor_code(s1, cache=cache)
+    st = as_tensor(s1, cache=cache)
 
     # Test hit with same instance
-    assert pytensor_code(s1, cache=cache) is st
+    assert as_tensor(s1, cache=cache) is st
 
     # Test miss with same instance but new cache
-    assert pytensor_code(s1, cache={}) is not st
+    assert as_tensor(s1, cache={}) is not st
 
     # Test hit with different but equivalent instance
-    assert pytensor_code(s2, cache=cache) is st
+    assert as_tensor(s2, cache=cache) is st
 
 
 def test_global_cache():
-    """ Test use of the global cache. """
-    from pytensor_printer.printing import global_cache
+    """Test use of the global cache."""
+    from sympytensor.pytensor import global_cache
 
     backup = dict(global_cache)
     try:
@@ -456,8 +467,8 @@ def test_global_cache():
         global_cache.clear()
 
         for s in [x, X, f_t]:
-            st = pytensor_code(s)
-            assert pytensor_code(s) is st
+            st = as_tensor(s)
+            assert as_tensor(s) is st
 
     finally:
         # Restore global cache
@@ -470,13 +481,13 @@ def test_cache_types_distinct():
     AppliedUndef) are distinguished by the cache even if they have the same
     name.
     """
-    symbols = [sp.Symbol('f_t'), sp.MatrixSymbol('f_t', 4, 4), f_t]
+    symbols = [sp.Symbol("f_t"), sp.MatrixSymbol("f_t", 4, 4), f_t]
 
     cache = {}  # Single shared cache
     printed = {}
 
     for s in symbols:
-        st = pytensor_code(s, cache=cache)
+        st = as_tensor(s, cache=cache)
         assert st not in printed.values()
         printed[s] = st
 
@@ -485,7 +496,7 @@ def test_cache_types_distinct():
 
     # Check retrieving
     for s, st in printed.items():
-        assert pytensor_code(s, cache=cache) is st
+        assert as_tensor(s, cache=cache) is st
 
 
 def test_symbols_are_created_once():
@@ -494,10 +505,10 @@ def test_symbols_are_created_once():
     more than once.
     """
     expr = sp.Add(x, x, evaluate=False)
-    comp = pytensor_code(expr)
+    comp = as_tensor(expr)
 
     assert pt_eq(comp, xt + xt)
-    assert not pt_eq(comp, xt + pytensor_code(x))
+    assert not pt_eq(comp, xt + as_tensor(x))
 
 
 def test_cache_complex():
@@ -505,9 +516,9 @@ def test_cache_complex():
     Test caching on a complicated expression with multiple symbols appearing
     multiple times.
     """
-    expr = x ** 2 + (y - sp.exp(x)) * sp.sin(z - x * y)
+    expr = x**2 + (y - sp.exp(x)) * sp.sin(z - x * y)
     symbol_names = {s.name for s in expr.free_symbols}
-    expr_t = pytensor_code(expr)
+    expr_t = as_tensor(expr)
 
     # Iterate through variables in the Pytensor computational graph that the
     # printed expression depends on
@@ -527,30 +538,30 @@ def test_cache_complex():
 def test_Piecewise():
     # A piecewise linear
     expr = sp.Piecewise((0, x < 0), (x, x < 2), (1, True))  # ___/III
-    result = pytensor_code(expr)
+    result = as_tensor(expr)
     assert result.owner.op == pt.switch
 
     expected = pt.switch(xt < 0, 0, pt.switch(xt < 2, xt, 1))
     assert pt_eq(result, expected)
 
     expr = sp.Piecewise((x, x < 0))
-    result = pytensor_code(expr)
+    result = as_tensor(expr)
     expected = pt.switch(xt < 0, xt, np.nan)
     assert pt_eq(result, expected)
 
     expr = sp.Piecewise((0, sp.And(x > 0, x < 2)), (x, sp.Or(x > 2, x < 0)))
-    result = pytensor_code(expr)
+    result = as_tensor(expr)
     expected = pt.switch(pt.and_(xt > 0, xt < 2), 0, pt.switch(pt.or_(xt > 2, xt < 0), xt, np.nan))
     assert pt_eq(result, expected)
 
 
 def test_Relationals():
-    assert pt_eq(pytensor_code(sp.Eq(x, y)), pt.eq(xt, yt))
-    assert pt_eq(pytensor_code(sp.Ne(x, y)), pt.neq(xt, yt))
-    assert pt_eq(pytensor_code(x > y), xt > yt)
-    assert pt_eq(pytensor_code(x < y), xt < yt)
-    assert pt_eq(pytensor_code(x >= y), xt >= yt)
-    assert pt_eq(pytensor_code(x <= y), xt <= yt)
+    assert pt_eq(as_tensor(sp.Eq(x, y)), pt.eq(xt, yt))
+    assert pt_eq(as_tensor(sp.Ne(x, y)), pt.neq(xt, yt))
+    assert pt_eq(as_tensor(x > y), xt > yt)
+    assert pt_eq(as_tensor(x < y), xt < yt)
+    assert pt_eq(as_tensor(x >= y), xt >= yt)
+    assert pt_eq(as_tensor(x <= y), xt <= yt)
 
 
 def test_complexfunctions():
@@ -558,13 +569,13 @@ def test_complexfunctions():
 
     atv = pt.as_tensor_variable
     cplx = pt.complex
-    dtypes = {x: 'complex128', y: 'complex128'}
-    xt, yt = pytensor_code(x, dtypes=dtypes), pytensor_code(y, dtypes=dtypes)
+    dtypes = {x: "complex128", y: "complex128"}
+    xt, yt = as_tensor(x, dtypes=dtypes), as_tensor(y, dtypes=dtypes)
 
-    assert pt_eq(pytensor_code(y * conjugate(x), dtypes=dtypes), yt * (xt.conj()))
-    assert pt_eq(pytensor_code((1 + 2j) * x), xt * (atv(1.0) + atv(2.0) * cplx(0, 1)))
+    assert pt_eq(as_tensor(y * conjugate(x), dtypes=dtypes), yt * (xt.conj()))
+    assert pt_eq(as_tensor((1 + 2j) * x), xt * (atv(1.0) + atv(2.0) * cplx(0, 1)))
 
 
 def test_constant_functions():
     tf = pytensor_function([], [1 + 1j])
-    assert (tf() == 1 + 1j)
+    assert tf() == 1 + 1j

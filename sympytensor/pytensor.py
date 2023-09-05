@@ -1,14 +1,13 @@
+from functools import partial
 from typing import Any
 
+import pytensor
+import pytensor.scalar as ps
+import pytensor.tensor as pt
 import sympy as sp
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
-from functools import partial
-import pytensor
-import pytensor.tensor as pt
-import pytensor.scalar as ps
-
-from pytensor.tensor.elemwise import Elemwise, DimShuffle
 
 mapping = {
     sp.Add: pt.add,
@@ -65,7 +64,7 @@ mapping = {
 
 
 class PytensorPrinter(Printer):
-    """ Code printer which creates Pytensor symbolic expression graphs.
+    """Code printer which creates Pytensor symbolic expression graphs.
 
     Parameters
     ==========
@@ -91,14 +90,15 @@ class PytensorPrinter(Printer):
         created only once. Symbols are differentiated only by name and type. The
         format of the cache's contents should be considered opaque to the user.
     """
+
     printmethod = "_pytensor"
 
     def __init__(self, *args, **kwargs):
-        self.cache = kwargs.pop('cache', {})
+        self.cache = kwargs.pop("cache", {})
         super().__init__(*args, **kwargs)
 
     def _get_key(self, s, name=None, dtype=None, broadcastable=None):
-        """ Get the cache key for a SymPy object.
+        """Get the cache key for a SymPy object.
 
         Parameters
         ==========
@@ -125,7 +125,7 @@ class PytensorPrinter(Printer):
         if name is None:
             name = s.name
         if dtype is None:
-            dtype = 'floatX'
+            dtype = "floatX"
         if broadcastable is None:
             broadcastable = ()
 
@@ -139,14 +139,14 @@ class PytensorPrinter(Printer):
         return value
 
     def _print_Symbol(self, s, **kwargs):
-        dtype = kwargs.get('dtypes', {}).get(s)
-        bc = kwargs.get('broadcastables', {}).get(s)
+        dtype = kwargs.get("dtypes", {}).get(s)
+        bc = kwargs.get("broadcastables", {}).get(s)
         return self._get_or_create(s, dtype=dtype, broadcastable=bc)
 
     def _print_AppliedUndef(self, s, **kwargs):
-        name = str(type(s)) + '_' + str(s.args[0])
-        dtype = kwargs.get('dtypes', {}).get(s)
-        bc = kwargs.get('broadcastables', {}).get(s)
+        name = str(type(s)) + "_" + str(s.args[0])
+        dtype = kwargs.get("dtypes", {}).get(s)
+        bc = kwargs.get("broadcastables", {}).get(s)
         return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
 
     def _print_Basic(self, expr, **kwargs):
@@ -159,14 +159,11 @@ class PytensorPrinter(Printer):
         return float(n.evalf())
 
     def _print_MatrixSymbol(self, X, **kwargs):
-        dtype = kwargs.get('dtypes', {}).get(X)
+        dtype = kwargs.get("dtypes", {}).get(X)
         return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
 
     def _print_DenseMatrix(self, X, **kwargs):
-        return pt.stacklists([
-            [self._print(arg, **kwargs) for arg in L]
-            for L in X.tolist()
-        ])
+        return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
@@ -184,8 +181,10 @@ class PytensorPrinter(Printer):
             for i in range(children[1]):
                 result = pt.dot(result, children[0])
         else:
-            raise NotImplementedError('''Only non-negative integer
-           powers of matrices can be handled by Pytensor at the moment''')
+            raise NotImplementedError(
+                """Only non-negative integer
+           powers of matrices can be handled by Pytensor at the moment"""
+            )
         return result
 
     def _print_MatrixSlice(self, expr, **kwargs):
@@ -196,21 +195,25 @@ class PytensorPrinter(Printer):
 
     def _print_BlockMatrix(self, expr, **kwargs):
         nrows, ncols = expr.blocks.shape
-        blocks = [[self._print(expr.blocks[r, c], **kwargs)
-                   for c in range(ncols)]
-                  for r in range(nrows)]
+        blocks = [
+            [self._print(expr.blocks[r, c], **kwargs) for c in range(ncols)] for r in range(nrows)
+        ]
         return pt.join(0, *[pt.join(1, *row) for row in blocks])
 
     def _print_slice(self, expr, **kwargs):
-        return slice(*[self._print(i, **kwargs)
-                       if isinstance(i, sp.Basic) else i
-                       for i in (expr.start, expr.stop, expr.step)])
+        return slice(
+            *[
+                self._print(i, **kwargs) if isinstance(i, sp.Basic) else i
+                for i in (expr.start, expr.stop, expr.step)
+            ]
+        )
 
     def _print_Pi(self, expr, **kwargs):
         return 3.141592653589793
 
     def _print_Piecewise(self, expr, **kwargs):
         import numpy as np
+
         e, cond = expr.args[0].args  # First condition and corresponding value
 
         # Print conditional expression and value for first condition
@@ -227,8 +230,7 @@ class PytensorPrinter(Printer):
         return pt.switch(p_cond, p_e, p_remaining)
 
     def _print_Rational(self, expr, **kwargs):
-        return pt.true_div(self._print(expr.p, **kwargs),
-                           self._print(expr.q, **kwargs))
+        return pt.true_div(self._print(expr.p, **kwargs), self._print(expr.q, **kwargs))
 
     def _print_Integer(self, expr, **kwargs):
         return expr.p
@@ -249,7 +251,7 @@ class PytensorPrinter(Printer):
         return expr
 
     def doprint(self, expr, dtypes=None, broadcastables=None):
-        """ Convert a SymPy expression to a Pytensor graph variable.
+        """Convert a SymPy expression to a Pytensor graph variable.
 
         The ``dtypes`` and ``broadcastable`` arguments are used to specify the
         data type, dimension, and broadcasting behavior of the Pytensor variables
@@ -300,7 +302,7 @@ class PytensorPrinter(Printer):
 global_cache: dict[Any, Any] = {}
 
 
-def pytensor_code(expr, cache=None, **kwargs):
+def as_tensor(expr, cache=None, **kwargs):
     """
     Convert a SymPy expression into a Pytensor graph variable.
 
@@ -370,10 +372,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
 
     if dims is not None:
         maxdim = max(dims.values())
-        return {
-            s: (False,) * d + (True,) * (maxdim - d)
-            for s, d in dims.items()
-        }
+        return {s: (False,) * d + (True,) * (maxdim - d) for s, d in dims.items()}
 
     if broadcastables is not None:
         return broadcastables
@@ -381,8 +380,9 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
     return {}
 
 
-def pytensor_function(inputs, outputs, scalar=False, *,
-                    dim=None, dims=None, broadcastables=None, **kwargs):
+def pytensor_function(
+    inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
+):
     """
     Create a Pytensor function from SymPy expressions.
 
@@ -444,7 +444,7 @@ def pytensor_function(inputs, outputs, scalar=False, *,
     ========
 
     >>> from sympy.abc import x, y, z
-    >>> from pytensor_printer.printing import pytensor_function
+    >>> from sympytensor.printing import pytensor_function
 
     A simple function with one input and one output:
 
@@ -472,22 +472,28 @@ def pytensor_function(inputs, outputs, scalar=False, *,
     """
 
     # Pop off non-pytensor keyword args
-    cache = kwargs.pop('cache', {})
-    dtypes = kwargs.pop('dtypes', {})
+    cache = kwargs.pop("cache", {})
+    dtypes = kwargs.pop("dtypes", {})
 
     broadcastables = dim_handling(
-        inputs, dim=dim, dims=dims, broadcastables=broadcastables,
+        inputs,
+        dim=dim,
+        dims=dims,
+        broadcastables=broadcastables,
     )
 
     # Print inputs/outputs
-    code = partial(pytensor_code, cache=cache, dtypes=dtypes,
-                   broadcastables=broadcastables)
+    code = partial(as_tensor, cache=cache, dtypes=dtypes, broadcastables=broadcastables)
     tinputs = list(map(code, inputs))
     toutputs = list(map(code, outputs))
 
     # fix constant expressions as variables
-    toutputs = [output if isinstance(output, pytensor.graph.basic.Variable) else pt.as_tensor_variable(output) for
-                output in toutputs]
+    toutputs = [
+        output
+        if isinstance(output, pytensor.graph.basic.Variable)
+        else pt.as_tensor_variable(output)
+        for output in toutputs
+    ]
 
     if len(toutputs) == 1:
         toutputs = toutputs[0]
