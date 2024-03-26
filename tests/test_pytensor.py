@@ -8,7 +8,7 @@ from pytensor.graph.basic import Variable
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
-from pytensor.tensor.var import TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
 Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
@@ -579,3 +579,19 @@ def test_complexfunctions():
 def test_constant_functions():
     tf = pytensor_function([], [1 + 1j])
     assert tf() == 1 + 1j
+
+
+def test_indexedbase():
+    x = as_tensor(sp.IndexedBase('x'))
+    assert x.name == 'x'
+    assert x.type.shape == (None, )
+
+    x = as_tensor(sp.IndexedBase('x', shape=(10, 10)))
+    assert x.name == 'x'
+    assert x.type.shape == (10, 10)
+
+    i = sp.Idx('i', range=10)
+    j = sp.Idx('j', range=2)
+    x = as_tensor(sp.IndexedBase('x')[i, j])
+    assert x.name == 'x'
+    assert x.type.shape == (10, 2)

@@ -167,6 +167,14 @@ class PytensorPrinter(Printer):
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
+    def _print_IndexedBase(self, X, **kwargs):
+        shape = (int(x) for x in X.shape) if X.shape else (None,)
+        return pt.tensor(name=str(X.label), shape=shape)
+
+    def _print_Indexed(self, X, **kwargs):
+        shape = (int(x) for x in X.shape) if X.shape else (None,)
+        return pt.tensor(name=str(X.base.label), shape=shape)
+
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
         result = children[0]
@@ -381,7 +389,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
 
 
 def pytensor_function(
-    inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
+        inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
 ):
     """
     Create a Pytensor function from SymPy expressions.
