@@ -595,3 +595,13 @@ def test_indexedbase():
     x = as_tensor(sp.IndexedBase('x')[i, j])
     assert x.name == 'x'
     assert x.type.shape == (10, 2)
+
+    x = sp.IndexedBase('x', shape=(10,))
+    x = as_tensor(x[0])
+    assert x.type.shape == ()
+
+    x = sp.IndexedBase('x')[0, j]
+    x = as_tensor(x)
+    assert x.type.shape == (2,)
+    assert x.owner.inputs[0].ndim == 2
+    assert x.owner.inputs[0].type.shape == (None, 2)

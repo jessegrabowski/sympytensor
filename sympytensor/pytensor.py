@@ -8,6 +8,8 @@ import sympy as sp
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
+from sympy.tensor.indexed import IndexException
+
 
 mapping = {
     sp.Add: pt.add,
@@ -172,8 +174,37 @@ class PytensorPrinter(Printer):
         return pt.tensor(name=str(X.label), shape=shape)
 
     def _print_Indexed(self, X, **kwargs):
-        shape = (int(x) for x in X.shape) if X.shape else (None,)
-        return pt.tensor(name=str(X.base.label), shape=shape)
+        indices = X.indices
+        shape = ()
+        ret_idx = ()
+        is_sliced = False
+        for i, idx in enumerate(indices):
+            if isinstance(idx, sp.Idx):
+                lower, upper = idx.lower, idx.upper
+                if lower is None and upper is None:
+                    shape += (None,)
+                    ret_idx += (slice(None, None), )
+                elif lower is None:
+                    upper = int(upper)
+                    shape += (upper + 1,)
+                    ret_idx += (slice(None, None), )
+                else:
+                    lower, upper = int(lower), int(upper)
+                    shape += (upper - lower + 1,)
+                    ret_idx += (slice(None, None), )
+            else:
+                try:
+                    shape += (int(X.shape[i]),)
+                except IndexException:
+                    shape += (None,)
+                ret_idx += (int(idx),)
+                is_sliced = True
+
+        x = pt.tensor(name=str(X.base.label), shape=shape)
+        if not is_sliced:
+            return x
+
+        return x[ret_idx]
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
