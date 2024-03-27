@@ -4,6 +4,7 @@ from typing import Any
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
+from pytensor.raise_op import CheckAndRaise
 import sympy as sp
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from sympy.printing.printer import Printer
@@ -117,7 +118,7 @@ class PytensorPrinter(Printer):
 
         return name, type(s), s.args, dtype, broadcastable
 
-    def _get_or_create(self, s, name=None, dtype=None, broadcastable=None):
+    def _get_or_create(self, s, name=None, dtype=None, broadcastable=None, shape=None):
         """
         Get the Pytensor variable for a SymPy symbol from the cache, or create it
         if it does not exist.
@@ -130,13 +131,15 @@ class PytensorPrinter(Printer):
             dtype = "floatX"
         if broadcastable is None:
             broadcastable = ()
+        if shape is None:
+            shape = ()
 
         key = self._get_key(s, name, dtype=dtype, broadcastable=broadcastable)
 
         if key in self.cache:
             return self.cache[key]
 
-        value = pt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
+        value = pt.tensor(name=name, dtype=dtype, broadcastable=broadcastable, shape=shape)
         self.cache[key] = value
         return value
 
@@ -164,47 +167,43 @@ class PytensorPrinter(Printer):
         dtype = kwargs.get("dtypes", {}).get(X)
         return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
 
+    def _print_Idx(self, i, **kwargs):
+        dtype = kwargs.get("dtypes", {}).get(i)
+        if dtype is None:
+            dtype = 'int32'
+
+        bc = kwargs.get("broadcastables", {}).get(i)
+        if i.lower is None and i.upper is None:
+            return self._get_or_create(i, dtype=dtype, broadcastable=bc)
+        elif i.lower is None:
+            valid_range = (0, int(i.upper.evalf() + 1))
+        else:
+            valid_range = (int(i.lower.evalf()), int(i.upper.evalf() + 1))
+
+        i = self._get_or_create(i, dtype=dtype, broadcastable=bc)
+        all_true_scalar = pt.all([pt.ge(i, valid_range[0]), pt.lt(i, valid_range[1])])
+        msg = f'Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}'
+
+        return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
+
     def _print_DenseMatrix(self, X, **kwargs):
         return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
     def _print_IndexedBase(self, X, **kwargs):
-        shape = (int(x) for x in X.shape) if X.shape else (None,)
-        return pt.tensor(name=str(X.label), shape=shape)
+        ndims = len(kwargs.get("shape", {}).get(X, {}))
+        shape = tuple((int(x) for x in X.shape)) if X.shape else (None,) * ndims
+        dtype = kwargs.get("dtypes", {}).get(X)
+
+        print(shape)
+        return self._get_or_create(X, dtype=dtype, broadcastable=shape, shape=shape)
 
     def _print_Indexed(self, X, **kwargs):
-        indices = X.indices
-        shape = ()
-        ret_idx = ()
-        is_sliced = False
-        for i, idx in enumerate(indices):
-            if isinstance(idx, sp.Idx):
-                lower, upper = idx.lower, idx.upper
-                if lower is None and upper is None:
-                    shape += (None,)
-                    ret_idx += (slice(None, None), )
-                elif lower is None:
-                    upper = int(upper)
-                    shape += (upper + 1,)
-                    ret_idx += (slice(None, None), )
-                else:
-                    lower, upper = int(lower), int(upper)
-                    shape += (upper - lower + 1,)
-                    ret_idx += (slice(None, None), )
-            else:
-                try:
-                    shape += (int(X.shape[i]),)
-                except IndexException:
-                    shape += (None,)
-                ret_idx += (int(idx),)
-                is_sliced = True
+        indices = [self._print(x) for x in X.indices]
+        base = self._print(X.base, shape={X.base: (None if not isinstance(i, int) else i for i in indices)})
 
-        x = pt.tensor(name=str(X.base.label), shape=shape)
-        if not is_sliced:
-            return x
-
-        return x[ret_idx]
+        return base[tuple(indices)]
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
