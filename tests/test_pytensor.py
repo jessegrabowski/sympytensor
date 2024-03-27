@@ -162,9 +162,9 @@ def test_trig(f_sp, f_pt):
 
 def test_complex_expression():
     """Test printing a complex expression with multiple symbols."""
-    expr = sp.exp(x ** 2 + sp.cos(y)) * sp.log(2 * z)
+    expr = sp.exp(x**2 + sp.cos(y)) * sp.log(2 * z)
     comp = as_tensor(expr)
-    expected = pt.exp(xt ** 2 + pt.cos(yt)) * pt.log(2 * zt)
+    expected = pt.exp(xt**2 + pt.cos(yt)) * pt.log(2 * zt)
     assert pt_eq(comp, expected)
 
 
@@ -294,18 +294,18 @@ def test_dim_handling():
     "kwargs, test_inputs, expected_result",
     [
         (
-                dict(
-                    dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}
-                ),
-                ([1, 2], [3, 4], [0, 0]),
-                (np.asarray([4, 6])),
+            dict(
+                dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}
+            ),
+            ([1, 2], [3, 4], [0, 0]),
+            (np.asarray([4, 6])),
         ),
         (
-                dict(
-                    dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"
-                ),
-                ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
-                (3 * np.arange(3)),
+            dict(
+                dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"
+            ),
+            ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
+            (3 * np.arange(3)),
         ),
     ],
 )
@@ -516,7 +516,7 @@ def test_cache_complex():
     Test caching on a complicated expression with multiple symbols appearing
     multiple times.
     """
-    expr = x ** 2 + (y - sp.exp(x)) * sp.sin(z - x * y)
+    expr = x**2 + (y - sp.exp(x)) * sp.sin(z - x * y)
     symbol_names = {s.name for s in expr.free_symbols}
     expr_t = as_tensor(expr)
 
@@ -583,36 +583,65 @@ def test_constant_functions():
 
 def test_indexedbase():
     cache = {}
-    x = as_tensor(sp.IndexedBase('x'), cache=cache)
-    assert x.name == 'x'
+    x = as_tensor(sp.IndexedBase("x"), cache=cache)
+    assert x.name == "x"
     assert x.type.shape == (None,)
     assert len(cache) == 1
 
-    x = as_tensor(sp.IndexedBase('x', shape=(10, 10)), cache=cache)
-    assert x.name == 'x'
+
+def test_indexedbase_with_declared_shape():
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x", shape=(10, 10)), cache=cache)
+    assert x.name == "x"
     assert x.type.shape == (10, 10)
+    assert len(cache) == 1
+
+
+def test_indexedbase_with_different_shapes_cache_separately():
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x", shape=(10, 10)), cache=cache)
+    y = as_tensor(sp.IndexedBase("x", shape=(10, 7)), cache=cache)
+    assert x is not y
     assert len(cache) == 2
 
-    i = sp.Idx('i', range=10)
-    j = sp.Idx('j', range=2)
+
+def test_indexedbase_with_index():
+    i = sp.Idx("i", range=10)
+    j = sp.Idx("j", range=2)
 
     cache = {}
-    x = as_tensor(sp.IndexedBase('x')[i, j], cache=cache)
+    x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
     assert x.type.shape == ()
     assert x.owner.inputs[0].ndim == 2
     assert len(cache) == 3
 
     i_pt, j_pt, x_pt = list(cache.values())
     with pytest.raises(IndexError):
-        x = x.eval({x_pt: np.zeros((10, 10)), i_pt: 8, j_pt: 3})
+        x.eval({x_pt: np.zeros((10, 2)), i_pt: 8, j_pt: 3})
 
-    x = sp.IndexedBase('x', shape=(10,))
-    x = as_tensor(x[0])
+
+def test_sliced_indexbase_1d():
+    cache = {}
+    x = sp.IndexedBase("x", shape=(10,))
+    x = as_tensor(x[7], cache=cache)
+    x_pt = list(cache.values())[0]
+
     assert x.type.shape == ()
     assert x.owner.inputs[0].type.shape == (10,)
+    assert len(cache) == 1
+    assert x.eval({x_pt: np.arange(10)}) == 7.0
 
-    x = sp.IndexedBase('x')[0, j]
-    x = as_tensor(x)
-    assert x.type.shape == ()
-    assert x.owner.inputs[0].ndim == 2
-    assert x.owner.inputs[0].type.shape == (None, None)
+
+def test_sliced_indexbase_2d():
+    cache = {}
+    x = sp.IndexedBase("x", shape=(10, 10))
+    x1 = as_tensor(x[0, 1], cache=cache)
+    x2 = as_tensor(x[5, 4], cache=cache)
+    x_pt = list(cache.values())[0]
+
+    assert len(cache) == 1
+    assert x1.type.shape == ()
+    assert x1.owner.inputs[0].ndim == 2
+    assert x1.owner.inputs[0].type.shape == (10, 10)
+    assert x1.eval({x_pt: np.arange(100).reshape(10, 10)}) == 1.0
+    assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0

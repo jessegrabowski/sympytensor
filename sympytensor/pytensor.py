@@ -4,13 +4,11 @@ from typing import Any
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.raise_op import CheckAndRaise
 import sympy as sp
+from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
-from sympy.tensor.indexed import IndexException
-
 
 mapping = {
     sp.Add: pt.add,
@@ -170,7 +168,7 @@ class PytensorPrinter(Printer):
     def _print_Idx(self, i, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(i)
         if dtype is None:
-            dtype = 'int32'
+            dtype = "int32"
 
         bc = kwargs.get("broadcastables", {}).get(i)
         if i.lower is None and i.upper is None:
@@ -182,7 +180,7 @@ class PytensorPrinter(Printer):
 
         i = self._get_or_create(i, dtype=dtype, broadcastable=bc)
         all_true_scalar = pt.all([pt.ge(i, valid_range[0]), pt.lt(i, valid_range[1])])
-        msg = f'Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}'
+        msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
@@ -192,18 +190,38 @@ class PytensorPrinter(Printer):
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
     def _print_IndexedBase(self, X, **kwargs):
-        ndims = len(kwargs.get("shape", {}).get(X, {}))
-        shape = tuple((int(x) for x in X.shape)) if X.shape else (None,) * ndims
         dtype = kwargs.get("dtypes", {}).get(X)
+        shape = kwargs.get("shapes", None)
+        bc = kwargs.get("broadcastable", None)
+        # If shape and bc are None, it's because the IndexedBase was not indexed. The shape will either be
+        # (None, ), or the shape of the IndexedBase if it was declared.
 
-        print(shape)
-        return self._get_or_create(X, dtype=dtype, broadcastable=shape, shape=shape)
+        if shape is None and bc is None:
+            if X.shape is not None:
+                shape = tuple([int(x) if x is not None else None for x in X.shape])
+            else:
+                shape = (None,)
+            bc = shape
+        elif shape is None:
+            shape = bc
+
+        return self._get_or_create(X, dtype=dtype, broadcastable=bc, shape=shape)
 
     def _print_Indexed(self, X, **kwargs):
-        indices = [self._print(x) for x in X.indices]
-        base = self._print(X.base, shape={X.base: (None if not isinstance(i, int) else i for i in indices)})
+        # Infer the shape of the indexed base.
+        shape = X.base.shape
+        if X.shape is not None:
+            shape = tuple([int(x) if x is not None else None for x in X.shape])
+        else:
+            shape = (None,) * len(X.indices)
 
-        return base[tuple(indices)]
+        bc = kwargs.get("broadcastables", {}).get(X.base, None)
+        if bc is None:
+            bc = shape
+        indices = tuple([self._print(x) for x in X.indices])
+        base = self._print(X.base, shape=shape, broadcastable=bc, **kwargs)
+
+        return base[indices]
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
@@ -419,7 +437,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
 
 
 def pytensor_function(
-        inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
+    inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
 ):
     """
     Create a Pytensor function from SymPy expressions.
