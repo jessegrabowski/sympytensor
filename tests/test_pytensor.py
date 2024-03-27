@@ -582,26 +582,66 @@ def test_constant_functions():
 
 
 def test_indexedbase():
-    x = as_tensor(sp.IndexedBase('x'))
-    assert x.name == 'x'
-    assert x.type.shape == (None, )
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x"), cache=cache)
+    assert x.name == "x"
+    assert x.type.shape == (None,)
+    assert len(cache) == 1
 
-    x = as_tensor(sp.IndexedBase('x', shape=(10, 10)))
-    assert x.name == 'x'
+
+def test_indexedbase_with_declared_shape():
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x", shape=(10, 10)), cache=cache)
+    assert x.name == "x"
     assert x.type.shape == (10, 10)
+    assert len(cache) == 1
 
-    i = sp.Idx('i', range=10)
-    j = sp.Idx('j', range=2)
-    x = as_tensor(sp.IndexedBase('x')[i, j])
-    assert x.name == 'x'
-    assert x.type.shape == (10, 2)
 
-    x = sp.IndexedBase('x', shape=(10,))
-    x = as_tensor(x[0])
+def test_indexedbase_with_different_shapes_cache_separately():
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x", shape=(10, 10)), cache=cache)
+    y = as_tensor(sp.IndexedBase("x", shape=(10, 7)), cache=cache)
+    assert x is not y
+    assert len(cache) == 2
+
+
+def test_indexedbase_with_index():
+    i = sp.Idx("i", range=10)
+    j = sp.Idx("j", range=2)
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
     assert x.type.shape == ()
-
-    x = sp.IndexedBase('x')[0, j]
-    x = as_tensor(x)
-    assert x.type.shape == (2,)
     assert x.owner.inputs[0].ndim == 2
-    assert x.owner.inputs[0].type.shape == (None, 2)
+    assert len(cache) == 3
+
+    i_pt, j_pt, x_pt = list(cache.values())
+    with pytest.raises(IndexError):
+        x.eval({x_pt: np.zeros((10, 2)), i_pt: 8, j_pt: 3})
+
+
+def test_sliced_indexbase_1d():
+    cache = {}
+    x = sp.IndexedBase("x", shape=(10,))
+    x = as_tensor(x[7], cache=cache)
+    x_pt = list(cache.values())[0]
+
+    assert x.type.shape == ()
+    assert x.owner.inputs[0].type.shape == (10,)
+    assert len(cache) == 1
+    assert x.eval({x_pt: np.arange(10)}) == 7.0
+
+
+def test_sliced_indexbase_2d():
+    cache = {}
+    x = sp.IndexedBase("x", shape=(10, 10))
+    x1 = as_tensor(x[0, 1], cache=cache)
+    x2 = as_tensor(x[5, 4], cache=cache)
+    x_pt = list(cache.values())[0]
+
+    assert len(cache) == 1
+    assert x1.type.shape == ()
+    assert x1.owner.inputs[0].ndim == 2
+    assert x1.owner.inputs[0].type.shape == (10, 10)
+    assert x1.eval({x_pt: np.arange(100).reshape(10, 10)}) == 1.0
+    assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0
