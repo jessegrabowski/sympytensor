@@ -223,21 +223,28 @@ class PytensorPrinter(Printer):
 
         return base[indices]
 
-    def _print_Sum(self, X, **kwargs):
-        summand, [sum_dim, start, end] = X.args
-        dims = summand.indices
-        sum_idx = dims.index(sum_dim)
-        sum_slice = slice(start, end+1)
-        dummy_slice = slice(None, None)
-        idx = tuple(dummy_slice if i != sum_idx else sum_slice for i in range(len(dims)))
-
+    def _print_reduction(self, X, op: str = "sum", **kwargs):
+        summand, *sum_args = X.args
+        slice_dict = {
+            var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args
+        }
         summand_pt = self._print(summand, **kwargs)
-        x = [v for v in pytensor.graph.graph_inputs(summand_pt) if not isinstance(v, pt.TensorConstant)]
-        print(x)
-        # sum_dim = dims_pt[sum_idx]
-        # summand = pytensor.clone_replace(summand, {sum_dim: sum_slice})
-        #
-        # return pt.sum(summand, axis=sum_idx)
+        base, *indexes = summand_pt.owner.inputs
+        dims_pt = list(map(lambda x: x.owner.inputs[0], indexes))
+
+        out_idx = [slice_dict.get(idx.name, idx) for i, idx in enumerate(dims_pt)]
+        sum_axes = [i for i, idx in enumerate(dims_pt) if idx.name in slice_dict]
+
+        if op == "sum":
+            return pt.sum(base[tuple(out_idx)], axis=sum_axes)
+        elif op == "prod":
+            return pt.prod(base[tuple(out_idx)], axis=sum_axes)
+
+    def _print_Sum(self, X, **kwargs):
+        return self._print_reduction(X, op="sum", **kwargs)
+
+    def _print_Product(self, X, **kwargs):
+        return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
