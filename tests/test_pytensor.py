@@ -19,6 +19,21 @@ from sympy.core.singleton import S
 
 from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function
 
+
+def get_pt_vars(cache, names):
+    if not isinstance(names, list):
+        names = [names]
+
+    pt_vars = list(cache.values())
+    var_names = [v.name for v in pt_vars]
+    out = []
+    for name in names:
+        var = pt_vars[var_names.index(name)]
+        out.append(var)
+
+    return out if len(out) > 1 else out[0]
+
+
 # Default set of matrix symbols for testing - make square so we can both
 # multiply and perform elementwise operations between them.
 X, Y, Z = (sp.MatrixSymbol(n, 4, 4) for n in "XYZ")
@@ -615,16 +630,33 @@ def test_indexedbase_with_index():
     assert x.owner.inputs[0].ndim == 2
     assert len(cache) == 3
 
-    i_pt, j_pt, x_pt = list(cache.values())
+    i_pt, j_pt, x_pt = get_pt_vars(cache, ["i", "j", "x"])
+    assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
+
     with pytest.raises(IndexError):
         x.eval({x_pt: np.zeros((10, 2)), i_pt: 8, j_pt: 3})
+
+
+def test_indexedbase_with_index_and_no_range():
+    i = sp.Idx("i")
+    j = sp.Idx("j")
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
+    assert x.type.shape == ()
+    assert x.owner.inputs[0].ndim == 2
+    assert len(cache) == 3
+
+    i_pt, j_pt, x_pt = get_pt_vars(cache, ["i", "j", "x"])
+
+    assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
 
 
 def test_sliced_indexbase_1d():
     cache = {}
     x = sp.IndexedBase("x", shape=(10,))
     x = as_tensor(x[7], cache=cache)
-    x_pt = list(cache.values())[0]
+    x_pt = get_pt_vars(cache, ["x"])
 
     assert x.type.shape == ()
     assert x.owner.inputs[0].type.shape == (10,)
@@ -637,7 +669,7 @@ def test_sliced_indexbase_2d():
     x = sp.IndexedBase("x", shape=(10, 10))
     x1 = as_tensor(x[0, 1], cache=cache)
     x2 = as_tensor(x[5, 4], cache=cache)
-    x_pt = list(cache.values())[0]
+    x_pt = get_pt_vars(cache, ["x"])
 
     assert len(cache) == 1
     assert x1.type.shape == ()
@@ -645,3 +677,66 @@ def test_sliced_indexbase_2d():
     assert x1.owner.inputs[0].type.shape == (10, 10)
     assert x1.eval({x_pt: np.arange(100).reshape(10, 10)}) == 1.0
     assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0
+
+
+@pytest.mark.parametrize("i_range", [(0, 10), (5, 7)])
+@pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
+def test_print_reduce_1d(i_range: tuple, reduce_op):
+    cache = {}
+    i = sp.Idx("i")
+
+    low, high = i_range
+    x = sp.IndexedBase(
+        "x",
+    )[i]
+    z = reduce_op(x, (i, low, high))
+    z = as_tensor(z, cache=cache)
+
+    x_pt = get_pt_vars(cache, ["x"])
+
+    x_val = np.arange(1, 11)
+    expected = x_val[low : high + 1]
+    expected = expected.sum() if reduce_op == sp.Sum else np.prod(expected)
+    assert z.eval({x_pt: x_val}) == expected
+
+
+@pytest.mark.parametrize("i_range", [(0, 10), (5, 7)])
+@pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
+def test_print_reduce_2d(i_range: tuple, reduce_op):
+    cache = {}
+    i = sp.Idx("i")
+    j = sp.Idx("j")
+
+    low, high = i_range
+    x = sp.IndexedBase(
+        "x",
+    )[i, j]
+    z = reduce_op(x, (i, low, high))
+    z = as_tensor(z, cache=cache)
+
+    x_pt, j_pt = get_pt_vars(cache, ["x", "j"])
+    x_val = np.arange(1, 21).reshape(10, 2)
+    expected = x_val[low : high + 1, 0]
+    expected = expected.sum(axis=0) if reduce_op == sp.Sum else np.prod(expected, axis=0)
+    assert z.eval({x_pt: x_val, j_pt: 0}) == expected
+
+
+@pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
+def test_print_sum_many_d(reduce_op):
+    cache = {}
+    i, j, k, l = sp.symbols("i j k l", cls=sp.Idx)
+
+    x = sp.IndexedBase(
+        "x",
+    )[i, j, k, l]
+    z = reduce_op(x, (i, 0, 1), (j, 0, 1), (k, 0, 1))
+    z = as_tensor(z, cache=cache)
+
+    x_pt, l_pt = get_pt_vars(cache, ["x", "l"])
+    x_val = np.linspace(1, 2, 16).reshape(2, 2, 2, 2)
+    expected = x_val[:2, :2, :2, 0]
+    expected = (
+        expected.sum(axis=(0, 1, 2)) if reduce_op == sp.Sum else np.prod(expected, axis=(0, 1, 2))
+    )
+
+    assert z.eval({x_pt: x_val, l_pt: 0}) == expected

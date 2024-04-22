@@ -210,7 +210,7 @@ class PytensorPrinter(Printer):
     def _print_Indexed(self, X, **kwargs):
         # Infer the shape of the indexed base.
         shape = X.base.shape
-        if X.shape is not None:
+        if shape is not None:
             shape = tuple([int(x) if x is not None else None for x in X.shape])
         else:
             shape = (None,) * len(X.indices)
@@ -222,6 +222,29 @@ class PytensorPrinter(Printer):
         base = self._print(X.base, shape=shape, broadcastable=bc, **kwargs)
 
         return base[indices]
+
+    def _print_reduction(self, X, op: str = "sum", **kwargs):
+        summand, *sum_args = X.args
+        slice_dict = {
+            var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args
+        }
+        summand_pt = self._print(summand, **kwargs)
+        base, *indexes = summand_pt.owner.inputs
+        dims_pt = list(map(lambda x: x.owner.inputs[0], indexes))
+
+        out_idx = [slice_dict.get(idx.name, idx) for i, idx in enumerate(dims_pt)]
+        sum_axes = [i for i, idx in enumerate(dims_pt) if idx.name in slice_dict]
+
+        if op == "sum":
+            return pt.sum(base[tuple(out_idx)], axis=sum_axes)
+        elif op == "prod":
+            return pt.prod(base[tuple(out_idx)], axis=sum_axes)
+
+    def _print_Sum(self, X, **kwargs):
+        return self._print_reduction(X, op="sum", **kwargs)
+
+    def _print_Product(self, X, **kwargs):
+        return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
