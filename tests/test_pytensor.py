@@ -616,8 +616,24 @@ def test_indexedbase_with_index():
     assert len(cache) == 3
 
     i_pt, j_pt, x_pt = list(cache.values())
+    assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
+
     with pytest.raises(IndexError):
         x.eval({x_pt: np.zeros((10, 2)), i_pt: 8, j_pt: 3})
+
+
+def test_indexedbase_with_index_and_no_range():
+    i = sp.Idx("i")
+    j = sp.Idx("j")
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
+    assert x.type.shape == ()
+    assert x.owner.inputs[0].ndim == 2
+    assert len(cache) == 3
+
+    i_pt, j_pt, x_pt = list(cache.values())
+    assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
 
 
 def test_sliced_indexbase_1d():
@@ -645,3 +661,15 @@ def test_sliced_indexbase_2d():
     assert x1.owner.inputs[0].type.shape == (10, 10)
     assert x1.eval({x_pt: np.arange(100).reshape(10, 10)}) == 1.0
     assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0
+
+
+def test_print_sum():
+    cache = {}
+    i = sp.Idx("i")
+    j = sp.Idx("j")
+
+    x = sp.IndexedBase('x',)[i, j]
+    z = sp.Sum(x, (i, 0, 10))
+    z = as_tensor(z, cache=cache)
+    print(cache)
+    assert False

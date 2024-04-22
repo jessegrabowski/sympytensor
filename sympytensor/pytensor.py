@@ -210,7 +210,7 @@ class PytensorPrinter(Printer):
     def _print_Indexed(self, X, **kwargs):
         # Infer the shape of the indexed base.
         shape = X.base.shape
-        if X.shape is not None:
+        if shape is not None:
             shape = tuple([int(x) if x is not None else None for x in X.shape])
         else:
             shape = (None,) * len(X.indices)
@@ -222,6 +222,22 @@ class PytensorPrinter(Printer):
         base = self._print(X.base, shape=shape, broadcastable=bc, **kwargs)
 
         return base[indices]
+
+    def _print_Sum(self, X, **kwargs):
+        summand, [sum_dim, start, end] = X.args
+        dims = summand.indices
+        sum_idx = dims.index(sum_dim)
+        sum_slice = slice(start, end+1)
+        dummy_slice = slice(None, None)
+        idx = tuple(dummy_slice if i != sum_idx else sum_slice for i in range(len(dims)))
+
+        summand_pt = self._print(summand, **kwargs)
+        x = [v for v in pytensor.graph.graph_inputs(summand_pt) if not isinstance(v, pt.TensorConstant)]
+        print(x)
+        # sum_dim = dims_pt[sum_idx]
+        # summand = pytensor.clone_replace(summand, {sum_dim: sum_slice})
+        #
+        # return pt.sum(summand, axis=sum_idx)
 
     def _print_MatMul(self, expr, **kwargs):
         children = [self._print(arg, **kwargs) for arg in expr.args]
