@@ -722,7 +722,7 @@ def test_print_reduce_2d(i_range: tuple, reduce_op):
 
 
 @pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
-def test_print_sum_many_d(reduce_op):
+def test_print_reduce_many_d(reduce_op):
     cache = {}
     i, j, k, l = sp.symbols("i j k l", cls=sp.Idx)
 

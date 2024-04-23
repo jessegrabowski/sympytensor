@@ -225,12 +225,15 @@ class PytensorPrinter(Printer):
 
     def _print_reduction(self, X, op: str = "sum", **kwargs):
         summand, *sum_args = X.args
+        dim_names = [x.name for x in summand.indices]
         slice_dict = {
             var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args
         }
         summand_pt = self._print(summand, **kwargs)
-        base, *indexes = summand_pt.owner.inputs
-        dims_pt = list(map(lambda x: x.owner.inputs[0], indexes))
+        inputs = list(pytensor.graph.graph_inputs([summand_pt]))
+
+        dims_pt = [x for x in inputs if x.name in dim_names]
+        base = [x for x in inputs if x.name == summand.base.name][0]
 
         out_idx = [slice_dict.get(idx.name, idx) for i, idx in enumerate(dims_pt)]
         sum_axes = [i for i, idx in enumerate(dims_pt) if idx.name in slice_dict]
