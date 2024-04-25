@@ -11,6 +11,10 @@ from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
 
 mapping = {
+    # Numbers
+    sp.core.numbers.ImaginaryUnit: lambda: pt.complex(0, 1),
+
+    # elemwise funcs
     sp.Add: pt.add,
     sp.Mul: pt.mul,
     sp.Abs: pt.abs,
@@ -53,7 +57,6 @@ mapping = {
     sp.Max: pt.maximum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.Min: pt.minimum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.conjugate: pt.conj,
-    sp.core.numbers.ImaginaryUnit: lambda: pt.complex(0, 1),
     # Matrices
     sp.MatAdd: Elemwise(ps.add),
     sp.HadamardProduct: Elemwise(ps.mul),
@@ -188,6 +191,32 @@ class PytensorPrinter(Printer):
         return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
+
+    def _print_SparseMatrix(self, X, **kwargs):
+        def dod_to_csr(dod):
+            data = []
+            idxs = []
+            pointers = [0]
+
+            for row in sorted(dod.keys()):
+                for col in sorted(dod[row].keys()):
+                    data.append(dod[row][col])
+                    idxs.append(col)
+                pointers.append(len(data))
+
+            max_row_index = max(dod.keys())
+            max_col_index = max(max(cols.keys()) for cols in dod.values())
+
+            shape = (max_row_index + 1, max_col_index + 1)
+
+            return data, idxs, pointers, shape
+
+        dod = X.todod()
+        data, idxs, pointers, shape = dod_to_csr(dod)
+        data = [self._print(d) for d in data]
+
+        return pytensor.sparse.CSR(data, idxs, pointers, shape)
+
 
     def _print_IndexedBase(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)

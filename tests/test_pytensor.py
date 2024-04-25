@@ -740,3 +740,11 @@ def test_print_reduce_many_d(reduce_op):
     )
 
     assert z.eval({x_pt: x_val, l_pt: 0}) == expected
+
+
+def test_sparse_matrix():
+    X = sp.SparseMatrix(2, 2, {(0, 1): 2, (1, 0): 3})
+    X_pt = as_tensor(X)
+
+    print(X_pt)
+    assert 0
