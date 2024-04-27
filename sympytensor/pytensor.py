@@ -13,7 +13,6 @@ from sympy.utilities.iterables import is_sequence
 mapping = {
     # Numbers
     sp.core.numbers.ImaginaryUnit: lambda: pt.complex(0, 1),
-
     # elemwise funcs
     sp.Add: pt.add,
     sp.Mul: pt.mul,
@@ -211,12 +210,15 @@ class PytensorPrinter(Printer):
 
             return data, idxs, pointers, shape
 
+        print("Hi :)")
+
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod)
         data = [self._print(d) for d in data]
 
         return pytensor.sparse.CSR(data, idxs, pointers, shape)
 
+    _print_ImmutableSparseMatrix = _print_MutableSparseMatrix = _print_SparseMatrix
 
     def _print_IndexedBase(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)

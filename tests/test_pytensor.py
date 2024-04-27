@@ -4,6 +4,8 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import pytest
+import scipy.sparse
+from numpy.testing import assert_allclose
 from pytensor.graph.basic import Variable
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -296,7 +298,7 @@ def test_pytensor_matrix_funciton_matches_numpy(n_out, scalar):
     if n_out == 1:
         output = np.expand_dims(output, 0)
     for out in output:
-        np.testing.assert_allclose(out, expected)
+        assert_allclose(out, expected)
 
 
 def test_dim_handling():
@@ -746,5 +748,6 @@ def test_sparse_matrix():
     X = sp.SparseMatrix(2, 2, {(0, 1): 2, (1, 0): 3})
     X_pt = as_tensor(X)
 
-    print(X_pt)
-    assert 0
+    assert X_pt.owner.op == pytensor.sparse.CSR
+    assert X_pt.eval() == scipy.sparse.csr_matrix([[0, 2], [3, 0]])
+    assert_allclose(X_pt.eval().todense(), np.array([[0, 2], [3, 0]]))
