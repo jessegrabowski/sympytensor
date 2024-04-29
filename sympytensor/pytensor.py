@@ -210,8 +210,6 @@ class PytensorPrinter(Printer):
 
             return data, idxs, pointers, shape
 
-        print("Hi :)")
-
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod)
         data = [self._print(d) for d in data]

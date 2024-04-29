@@ -4,13 +4,13 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import pytest
-import scipy.sparse
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import Variable
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.variable import TensorVariable
+from scipy import sparse
 
 xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
 Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
@@ -744,10 +744,36 @@ def test_print_reduce_many_d(reduce_op):
     assert z.eval({x_pt: x_val, l_pt: 0}) == expected
 
 
+def sparse_allclose(A, B, atol=1e-8):
+
+    # If you want to check matrix shapes as well
+    if np.array_equal(A.shape, B.shape) == 0:
+        return False
+
+    r1, c1, v1 = sparse.find(A)
+    r2, c2, v2 = sparse.find(B)
+    index_match = np.array_equal(r1, r2) & np.array_equal(c1, c2)
+
+    if index_match == 0:
+        return False
+    else:
+        return np.allclose(v1, v2, atol=atol)
+
+
 def test_sparse_matrix():
+    a, b = sp.symbols("a b")
     X = sp.SparseMatrix(2, 2, {(0, 1): 2, (1, 0): 3})
+    y = sp.SparseMatrix(2, 1, {(0, 0): a, (1, 0): b})
+    z = X @ y
+
     X_pt = as_tensor(X)
 
     assert X_pt.owner.op == pytensor.sparse.CSR
-    assert X_pt.eval() == scipy.sparse.csr_matrix([[0, 2], [3, 0]])
-    assert_allclose(X_pt.eval().todense(), np.array([[0, 2], [3, 0]]))
+    assert sparse_allclose(X_pt.eval(), sparse.csr_matrix([[0, 2], [3, 0]]))
+
+    cache = {}
+    z_pt = as_tensor(z, cache=cache)
+    a_pt, b_pt = get_pt_vars(cache, ["a", "b"])
+
+    assert z_pt.owner.op == pytensor.sparse.CSR
+    assert sparse_allclose(z_pt.eval({a_pt: 1, b_pt: 2}), sparse.csr_matrix([[4], [3]]))
