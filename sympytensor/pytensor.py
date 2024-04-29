@@ -11,6 +11,9 @@ from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
 
 mapping = {
+    # Numbers
+    sp.core.numbers.ImaginaryUnit: lambda: pt.complex(0, 1),
+    # elemwise funcs
     sp.Add: pt.add,
     sp.Mul: pt.mul,
     sp.Abs: pt.abs,
@@ -53,7 +56,6 @@ mapping = {
     sp.Max: pt.maximum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.Min: pt.minimum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.conjugate: pt.conj,
-    sp.core.numbers.ImaginaryUnit: lambda: pt.complex(0, 1),
     # Matrices
     sp.MatAdd: Elemwise(ps.add),
     sp.HadamardProduct: Elemwise(ps.mul),
@@ -189,6 +191,33 @@ class PytensorPrinter(Printer):
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
+    def _print_SparseMatrix(self, X, **kwargs):
+        def dod_to_csr(dod):
+            data = []
+            idxs = []
+            pointers = [0]
+
+            for row in sorted(dod.keys()):
+                for col in sorted(dod[row].keys()):
+                    data.append(dod[row][col])
+                    idxs.append(col)
+                pointers.append(len(data))
+
+            max_row_index = max(dod.keys())
+            max_col_index = max(max(cols.keys()) for cols in dod.values())
+
+            shape = (max_row_index + 1, max_col_index + 1)
+
+            return data, idxs, pointers, shape
+
+        dod = X.todod()
+        data, idxs, pointers, shape = dod_to_csr(dod)
+        data = [self._print(d) for d in data]
+
+        return pytensor.sparse.CSR(data, idxs, pointers, shape)
+
+    _print_ImmutableSparseMatrix = _print_MutableSparseMatrix = _print_SparseMatrix
+
     def _print_IndexedBase(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
         shape = kwargs.get("shapes", None)
@@ -225,12 +254,15 @@ class PytensorPrinter(Printer):
 
     def _print_reduction(self, X, op: str = "sum", **kwargs):
         summand, *sum_args = X.args
+        dim_names = [x.name for x in summand.indices]
         slice_dict = {
             var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args
         }
         summand_pt = self._print(summand, **kwargs)
-        base, *indexes = summand_pt.owner.inputs
-        dims_pt = list(map(lambda x: x.owner.inputs[0], indexes))
+        inputs = list(pytensor.graph.graph_inputs([summand_pt]))
+
+        dims_pt = [x for x in inputs if x.name in dim_names]
+        base = [x for x in inputs if x.name == summand.base.name][0]
 
         out_idx = [slice_dict.get(idx.name, idx) for i, idx in enumerate(dims_pt)]
         sum_axes = [i for i, idx in enumerate(dims_pt) if idx.name in slice_dict]
