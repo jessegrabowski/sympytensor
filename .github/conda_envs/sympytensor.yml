@@ -1,0 +1,13 @@
+name: sympytensor-test
+channels:
+- conda-forge
+dependencies:
+  # Base dependencies
+  - sympy
+  - pytensor
+  - pymc
+
+  # Testing dependencies
+  - pre-commit
+  - pytest
+  - pytest-cov
