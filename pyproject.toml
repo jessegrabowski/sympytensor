@@ -1,3 +1,40 @@
+[build-system]
+requires = [
+    "numpy",
+    "setuptools",
+    "versioneer[toml]",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = 'sympytensor'
+dynamic = ['version']
+requires-python = ">=3.10,<3.13"
+description = "Print sympy expressions to pytensor graphs"
+readme = "README.md"
+license = {text = "MIT License"}
+classifiers =[
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Mathematics"
+]
+
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "sympytensor/_version.py"
+versionfile_build = "sympytensor/_version.py"
+tag_prefix = "v"
+
+[tool.setuptools]
+py-modules = ['sympytensor']
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 xfail_strict=true
@@ -17,15 +54,7 @@ isort = 1
 black = 1
 pyupgrade = 1
 
-[tool.bumpver]
-current_version = "1.1.0"
-version_pattern = "MAJOR.MINOR.PATCH"
-commit_message  = "Bump version {old_version} -> {new_version}"
-commit          = true
-tag             = true
-push            = false
-
-[tool.bumpver.file_patterns]
-"pyproject.toml" = ['current_version = "{version}"']
-"setup.cfg" = ['version = {version}']
-"sympytensor/__init__.py" = ["{version}"]
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["sympytensor/_version.py", "setup.py"]
