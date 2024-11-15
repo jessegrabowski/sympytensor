@@ -6,7 +6,7 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 import sympy as sp
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import Elemwise
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
 
@@ -62,7 +62,7 @@ mapping = {
     sp.Trace: pt.linalg.trace,
     sp.Determinant: pt.linalg.det,
     sp.Inverse: pt.linalg.inv,
-    sp.Transpose: DimShuffle((False, False), [1, 0]),
+    sp.Transpose: pt.matrix_transpose,
 }
 
 
