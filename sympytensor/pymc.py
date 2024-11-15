@@ -1,5 +1,6 @@
 import pymc as pm
 import pytensor
+import sympy as sp
 
 from sympytensor.pytensor import as_tensor
 
@@ -28,11 +29,15 @@ def _match_cache_to_rvs(cache, model=None):
     return sub_dict
 
 
-def SympyDeterministic(name, expr, model=None, dims=None):
+def SympyDeterministic(name: str, expr: sp.Expr | list[sp.Expr], model=None, dims=None):
     model = pm.modelcontext(model)
     cache = {}
 
-    pytensor_expr = as_tensor(expr, cache=cache)
+    if isinstance(expr, list):
+        pytensor_expr = pytensor.tensor.stack([as_tensor(e, cache=cache) for e in expr])
+    else:
+        pytensor_expr = as_tensor(expr, cache=cache)
+
     replace_dict = _match_cache_to_rvs(cache, model)
 
     pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)

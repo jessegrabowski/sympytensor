@@ -66,8 +66,8 @@ def test_make_sympy_deterministic_complex():
     Ab = sp.Matrix([[system, bias]])
     A_rref, pivots = Ab.rref()
 
-    # Solutions are in the last column
-    model = A_rref[:, -1]
+    # Solutions are in the last column. Sympy can't squeeze, so extract the elements into a list
+    model = [elem for elem in A_rref[:, -1]]
     coords = {"variable": ["x_s", "x_d", "P", "P_e", "M_d", "M_s"]}
 
     with pm.Model(coords=coords) as m:
