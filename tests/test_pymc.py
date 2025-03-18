@@ -15,7 +15,7 @@ def test_match_rvs_to_symbols_simple():
     with pm.Model():
         x_pm = pm.Normal("x")
         cache = {}
-        y_pm = as_tensor(y_sp, cache=cache)
+        as_tensor(y_sp, cache=cache)
         sub_dict = _match_cache_to_rvs(cache)
 
     pymc_vars = [x_pm]
@@ -40,11 +40,11 @@ def test_make_sympy_deterministic_raises_if_missing_inputs():
     y_sp = x_sp + z_sp
 
     with pm.Model():
-        x_pm = pm.Normal("x")
+        pm.Normal("x")
         with pytest.raises(
             ValueError, match="The following symbols were found in the provided sympy expression"
         ):
-            y_pm = SympyDeterministic("y", y_sp)
+            SympyDeterministic("y", y_sp)
 
 
 def test_make_sympy_deterministic_complex():
@@ -70,7 +70,7 @@ def test_make_sympy_deterministic_complex():
     model = [elem for elem in A_rref[:, -1]]
     coords = {"variable": ["x_s", "x_d", "P", "P_e", "M_d", "M_s"]}
 
-    with pm.Model(coords=coords) as m:
+    with pm.Model(coords=coords):
         a = pm.Normal("a")
         b = pm.Normal("b")
         c = pm.Normal("c")
@@ -79,7 +79,7 @@ def test_make_sympy_deterministic_complex():
         tau = pm.Normal("tau")
 
         y = SympyDeterministic("y", model, dims=["variable"])
-        prior = pm.sample_prior_predictive()
+        pm.sample_prior_predictive()
 
     *param_draw, y_draw = pm.draw([a, b, c, d, P_e_bar, tau, y])
     f_sympy = sp.lambdify(params, model)

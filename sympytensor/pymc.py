@@ -42,9 +42,7 @@ def SympyDeterministic(name: str, expr: sp.Expr | list[sp.Expr], model=None, dim
     pytensor_expr = pytensor.tensor.as_tensor_variable(pytensor_expr)
 
     replace_dict = _match_cache_to_rvs(cache, model)
-    pymc_expr = pytensor.graph_replace(pytensor_expr,
-                                       replace_dict,
-                                       strict=True)
+    pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)
     expr_pm = pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)
 
     return expr_pm
