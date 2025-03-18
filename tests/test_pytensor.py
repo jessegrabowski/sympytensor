@@ -460,6 +460,27 @@ def test_DenseMatrix():
         assert isinstance(tX, TensorVariable)
         assert isinstance(tX.owner.op, Join)
 
+def test_large_dense_matrix():
+    from pytensor.tensor.subtensor import AdvancedIncSubtensor
+    from pytensor.tensor.basic import Join
+
+    vars = [sp.Symbol(f'x_{i}') for i in range(100)]
+
+    eqs = sp.Matrix([x ** 2 for x in vars])
+    jac = eqs.jacobian(vars)
+
+    jac_pt = as_tensor(jac)
+
+    # Very large or sparse matrices use SetSubtensor to build the matri
+    assert isinstance(jac_pt.owner.op, AdvancedIncSubtensor)
+
+    small_eqs = sp.Matrix([x ** 2 for x in vars[:3]])
+    small_jac = small_eqs.jacobian(vars[:3])
+    small_jac_pt = as_tensor(small_jac)
+
+    # Small matrices use join to directly stack the vectors
+    assert isinstance(small_jac_pt.owner.op, Join)
+
 
 # Pairs of objects which should be considered equivalent with respect to caching
 pairs = [
