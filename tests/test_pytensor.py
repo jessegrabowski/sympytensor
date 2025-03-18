@@ -127,6 +127,14 @@ def pt_eq(a, b):
     return astr == bstr
 
 
+def test_constants():
+    """Test that constants are printed correctly."""
+    float_one = sp.Float(1.0)
+    int_one = sp.Integer(1)
+    assert as_tensor(int_one) == 1
+    assert as_tensor(float_one) == 1.0
+
+
 @pytest.mark.parametrize("pt_obj, sp_obj", zip([xt, yt, zt, Xt, Yt, Zt], [x, y, z, X, Y, Z]))
 def test_example_symbols(pt_obj, sp_obj):
     """

@@ -102,3 +102,11 @@ def test_sympy_deterministic_linalg():
         A_inv_pt = pt.linalg.inv(A_pt)
 
     assert_allclose(*pm.draw([A_inv_pm, A_inv_pt]))
+
+
+def test_sympy_deterministic_constant():
+    x = sp.Float(5.0)
+    with pm.Model():
+        x_pm = SympyDeterministic("x", x)
+
+    assert_allclose(pm.draw(x_pm, draws=100), 5.0)
