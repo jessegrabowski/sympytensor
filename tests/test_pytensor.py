@@ -262,7 +262,8 @@ def test_Integers():
 
 def test_factorial():
     n = sp.Symbol("n")
-    assert as_tensor(sp.factorial(n))
+    sp_fact = as_tensor(sp.factorial(n))
+    assert sp_fact.eval({'n':3}) == 6
 
 
 @pytest.mark.filterwarnings("ignore: A Supervisor feature is missing")

@@ -15,7 +15,7 @@ def _match_cache_to_rvs(cache, model=None):
         for info, pytensor_var in cache.items():
             param_name, constructor, broadcast, dtype, shape = info
             param = getattr(pymc_model, param_name, None)
-            if param:
+            if param is not None:
                 found_params.append(param.name)
                 sub_dict[pytensor_var] = param
 
