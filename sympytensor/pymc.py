@@ -15,7 +15,7 @@ def _match_cache_to_rvs(cache, model=None):
         for info, pytensor_var in cache.items():
             param_name, constructor, broadcast, dtype, shape = info
             param = getattr(pymc_model, param_name, None)
-            if param:
+            if param is not None:
                 found_params.append(param.name)
                 sub_dict[pytensor_var] = param
 
@@ -38,8 +38,10 @@ def SympyDeterministic(name: str, expr: sp.Expr | list[sp.Expr], model=None, dim
     else:
         pytensor_expr = as_tensor(expr, cache=cache)
 
-    replace_dict = _match_cache_to_rvs(cache, model)
+    # This catches corner cases where the input is a constant variable
+    pytensor_expr = pytensor.tensor.as_tensor_variable(pytensor_expr)
 
+    replace_dict = _match_cache_to_rvs(cache, model)
     pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)
     expr_pm = pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)
 

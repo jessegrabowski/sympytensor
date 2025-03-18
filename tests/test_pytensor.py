@@ -5,21 +5,21 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
-from pytensor.graph.basic import Variable
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot
 from pytensor.tensor.variable import TensorVariable
 from scipy import sparse
 
-xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
-Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
-
 import sympy as sp
 from sympy.abc import t, x, y, z
 from sympy.core.singleton import S
 
 from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function
+
+
+xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
+Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
 
 
 def get_pt_vars(cache, names):
@@ -107,7 +107,7 @@ def pt_eq(a, b):
     b_is_seq = isinstance(b, (tuple, list))
 
     if a_is_seq or b_is_seq:
-        if not (a_is_seq and b_is_seq) or type(a) != type(b):
+        if not (a_is_seq and b_is_seq) or not (isinstance(a, type(b))):
             return False
 
         return list(map(pt_eq, a)) == list(map(pt_eq, b))
@@ -125,6 +125,14 @@ def pt_eq(a, b):
             )
 
     return astr == bstr
+
+
+def test_constants():
+    """Test that constants are printed correctly."""
+    float_one = sp.Float(1.0)
+    int_one = sp.Integer(1)
+    assert as_tensor(int_one) == 1
+    assert as_tensor(float_one) == 1.0
 
 
 @pytest.mark.parametrize("pt_obj, sp_obj", zip([xt, yt, zt, Xt, Yt, Zt], [x, y, z, X, Y, Z]))
@@ -254,12 +262,15 @@ def test_Integers():
 
 def test_factorial():
     n = sp.Symbol("n")
-    assert as_tensor(sp.factorial(n))
+    sp_fact = as_tensor(sp.factorial(n))
+    assert sp_fact.eval({'n':3}) == 6
 
 
 @pytest.mark.filterwarnings("ignore: A Supervisor feature is missing")
 def test_Derivative():
-    simp = lambda expr: pytensor_simplify(fgraph_of(expr))
+    def simp(expr):
+        return pytensor_simplify(fgraph_of(expr))
+
     assert pt_eq(
         simp(as_tensor(sp.Derivative(sp.sin(x), x, evaluate=False))),
         simp(pytensor.grad(pt.sin(xt), xt)),
@@ -726,7 +737,7 @@ def test_print_reduce_2d(i_range: tuple, reduce_op):
 @pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
 def test_print_reduce_many_d(reduce_op):
     cache = {}
-    i, j, k, l = sp.symbols("i j k l", cls=sp.Idx)
+    i, j, k, l = sp.symbols("i j k l", cls=sp.Idx)  # noqa: E741
 
     x = sp.IndexedBase(
         "x",
@@ -745,7 +756,6 @@ def test_print_reduce_many_d(reduce_op):
 
 
 def sparse_allclose(A, B, atol=1e-8):
-
     # If you want to check matrix shapes as well
     if np.array_equal(A.shape, B.shape) == 0:
         return False
