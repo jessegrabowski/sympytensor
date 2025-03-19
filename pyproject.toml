@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = 'sympytensor'
 dynamic = ['version']
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 description = "Print sympy expressions to pytensor graphs"
 readme = "README.md"
 license = {text = "MIT License"}
@@ -24,6 +24,25 @@ classifiers =[
   "Topic :: Scientific/Engineering :: Mathematics"
 ]
 
+keywords = [
+    "computer algebra",
+    "pytensor",
+    "sympy",
+]
+
+dependencies = [
+    "pytensor",
+    "sympy",
+    "pymc"
+  ]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "versioneer",
+]
 
 [tool.versioneer]
 VCS = "git"
