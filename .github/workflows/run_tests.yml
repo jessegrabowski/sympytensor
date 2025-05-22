@@ -13,15 +13,11 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.13"
-            pytensor-flags: "gcc__cxxflags='-march'"
           - os: windows-latest
             python-version: "3.11"
-            pytensor-flags: "gcc__cxxflags='-march=core2'"
 
     runs-on: ${{ matrix.os }}
 
-    env:
-      PYTENSOR_FLAGS: ${{ matrix.pytensor-flags }}
     defaults:
         run:
           shell: bash -leo pipefail {0}
