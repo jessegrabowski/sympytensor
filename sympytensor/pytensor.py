@@ -210,17 +210,12 @@ class PytensorPrinter(Printer):
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
-    def _print_DenseMatrix(self, X, **kwargs):
-        n_elements = X.shape[0] * X.shape[1]
-        nnz = sum([x == 0 for L in X.tolist() for x in L])
-        sparsity = nnz / n_elements
+    def _print_DenseMatrix_stacklists(self, X, **kwargs):
+        """Create a matrix using stacklists approach."""
+        return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
 
-        if sparsity < 0.8 or n_elements < 100:
-            # For small matrices or dense matrices, use stacklists
-            return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
-
-        # If there are a lot of zeros, stacklists makes a really gnarly graph.
-        # It's nicer to make a zero matrix and set the nonzero elements.
+    def _print_DenseMatrix_setsubtensor(self, X, **kwargs):
+        """Create a matrix using zeros and set_subtensor approach."""
         dod = sp.SparseMatrix(X).todod()
 
         X_pt = pt.zeros((X.shape[0], X.shape[1]))
@@ -232,8 +227,21 @@ class PytensorPrinter(Printer):
                 rows.append(row)
                 cols.append(col)
                 values.append(self._print(val, **kwargs))
-        X_pt = pt.set_subtensor(X_pt[pt.as_tensor(rows), pt.as_tensor(cols)], values)
+        X_pt = X_pt[pt.as_tensor(rows), pt.as_tensor(cols)].set(values)
         return X_pt
+
+    def _print_DenseMatrix(self, X, **kwargs):
+        """Print a dense matrix, choosing the appropriate method based on size and sparsity."""
+        n_elements = X.shape[0] * X.shape[1]
+        nnz = sum([x == 0 for L in X.tolist() for x in L])
+        sparsity = nnz / n_elements
+
+        if sparsity < 0.8 or n_elements < 100:
+            # For small matrices or dense matrices, use stacklists
+            return self._print_DenseMatrix_stacklists(X, **kwargs)
+
+        # If there are a lot of zeros, use the zeros and set_subtensor approach
+        return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
