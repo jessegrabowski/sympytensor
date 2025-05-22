@@ -13,8 +13,13 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.13"
+            test-subset: tests --benchmark-skip
+          - os: ubuntu-latest
+            python-version: "3.12"
+            test-subset: tests --benchmark-only
           - os: windows-latest
             python-version: "3.11"
+            test-subset: tests --benchmark-skip
 
     runs-on: ${{ matrix.os }}
 

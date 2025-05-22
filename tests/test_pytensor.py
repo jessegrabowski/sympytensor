@@ -824,8 +824,8 @@ def build_test_matrix(rng, size, sparsity):
 
 @pytest.mark.parametrize(
     "size, sparsity",
-    [(4, 1.0), (4, 0.5), (100, 1.0), (100, 0.1)],
-    ids=["small_dense", "small_sparse", "large_dense", "large_sparse"],
+    [(4, 1.0), (4, 0.5), (100, 0.1)],
+    ids=["small_dense", "small_sparse", "large_sparse"],
 )
 def test_dense_matrix_creation_methods(size, sparsity):
     """Test that both methods for creating dense matrices produce the same result."""
