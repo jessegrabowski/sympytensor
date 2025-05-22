@@ -15,7 +15,7 @@ import sympy as sp
 from sympy.abc import t, x, y, z
 from sympy.core.singleton import S
 
-from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function
+from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function, PytensorPrinter
 
 
 xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
@@ -263,7 +263,7 @@ def test_Integers():
 def test_factorial():
     n = sp.Symbol("n")
     sp_fact = as_tensor(sp.factorial(n))
-    assert sp_fact.eval({'n':3}) == 6
+    assert sp_fact.eval({"n": 3}) == 6
 
 
 @pytest.mark.filterwarnings("ignore: A Supervisor feature is missing")
@@ -459,6 +459,28 @@ def test_DenseMatrix():
         tX = as_tensor(X)
         assert isinstance(tX, TensorVariable)
         assert isinstance(tX.owner.op, Join)
+
+
+def test_large_dense_matrix():
+    from pytensor.tensor.subtensor import AdvancedIncSubtensor
+    from pytensor.tensor.basic import Join
+
+    vars = [sp.Symbol(f"x_{i}") for i in range(100)]
+
+    eqs = sp.Matrix([x**2 for x in vars])
+    jac = eqs.jacobian(vars)
+
+    jac_pt = as_tensor(jac)
+
+    # Very large or sparse matrices use SetSubtensor to build the matri
+    assert isinstance(jac_pt.owner.op, AdvancedIncSubtensor)
+
+    small_eqs = sp.Matrix([x**2 for x in vars[:3]])
+    small_jac = small_eqs.jacobian(vars[:3])
+    small_jac_pt = as_tensor(small_jac)
+
+    # Small matrices use join to directly stack the vectors
+    assert isinstance(small_jac_pt.owner.op, Join)
 
 
 # Pairs of objects which should be considered equivalent with respect to caching
@@ -787,3 +809,63 @@ def test_sparse_matrix():
 
     assert z_pt.owner.op == pytensor.sparse.CSR
     assert sparse_allclose(z_pt.eval({a_pt: 1, b_pt: 2}), sparse.csr_matrix([[4], [3]]))
+
+
+def build_test_matrix(rng, size, sparsity):
+    dense_values = rng.normal(size=(size * size))
+    n_zeros = int(size * size * (1 - sparsity))
+    if n_zeros > 0:
+        zero_idxs = rng.choice(n_zeros, size=size, replace=False)
+        dense_values[zero_idxs] = 0
+
+    matrix = sp.Matrix(dense_values.reshape(size, size))
+    return matrix
+
+
+@pytest.mark.parametrize(
+    "size, sparsity",
+    [(4, 1.0), (4, 0.5), (100, 0.1)],
+    ids=["small_dense", "small_sparse", "large_sparse"],
+)
+def test_dense_matrix_creation_methods(size, sparsity):
+    """Test that both methods for creating dense matrices produce the same result."""
+    rng = np.random.default_rng([size, sum(map(ord, "Matrix Creation Test"))])
+    cache = {}
+    printer = PytensorPrinter(cache=cache)
+
+    matrix = build_test_matrix(rng, size, sparsity)
+
+    result1 = printer._print_DenseMatrix_stacklists(matrix)
+    result2 = printer._print_DenseMatrix_setsubtensor(matrix)
+
+    f1 = pytensor.function([], result1)
+    f2 = pytensor.function([], result2)
+
+    output1 = f1()
+    output2 = f2()
+    assert_allclose(output1, output2)
+
+
+@pytest.mark.parametrize(
+    "size, sparsity",
+    [(4, 1.0), (4, 0.5), (100, 1.0), (100, 0.1), (200, 0.1)],
+    ids=["small_dense", "small_sparse", "large_dense", "large_sparse", "very_large_sparse"],
+)
+@pytest.mark.parametrize(
+    "method",
+    ["_print_DenseMatrix_stacklists", "_print_DenseMatrix_setsubtensor"],
+    ids=["direct", "set_subtensor"],
+)
+def test_matrix_perf(size, sparsity, method, benchmark):
+    rng = np.random.default_rng([size, sum(map(ord, "Matrix Creation Test"))])
+    cache = {}
+    printer = PytensorPrinter(cache=cache)
+
+    matrix = build_test_matrix(rng, size, sparsity)
+    result = getattr(printer, method)(matrix)
+
+    def compile_fn():
+        f1 = pytensor.function([], result)
+        return f1
+
+    benchmark(compile_fn)

@@ -66,6 +66,29 @@ mapping = {
 }
 
 
+def dod_to_csr(dod):
+    """
+    Convert a dictionary of dictionaries (dod) sparse representation (used by sympy) to a
+    compressed sparse row (csr) representation, used by pytensor.
+    """
+    data = []
+    idxs = []
+    pointers = [0]
+
+    for row in sorted(dod.keys()):
+        for col in sorted(dod[row].keys()):
+            data.append(dod[row][col])
+            idxs.append(col)
+        pointers.append(len(data))
+
+    max_row_index = max(dod.keys())
+    max_col_index = max(max(cols.keys()) for cols in dod.values())
+
+    shape = (max_row_index + 1, max_col_index + 1)
+
+    return data, idxs, pointers, shape
+
+
 class PytensorPrinter(Printer):
     """Code printer which creates Pytensor symbolic expression graphs.
 
@@ -186,30 +209,42 @@ class PytensorPrinter(Printer):
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
-    def _print_DenseMatrix(self, X, **kwargs):
+    def _print_DenseMatrix_stacklists(self, X, **kwargs):
+        """Create a matrix using stacklists approach."""
         return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
+
+    def _print_DenseMatrix_setsubtensor(self, X, **kwargs):
+        """Create a matrix using zeros and set_subtensor approach."""
+        dod = sp.SparseMatrix(X).todod()
+
+        X_pt = pt.zeros((X.shape[0], X.shape[1]))
+        rows = []
+        cols = []
+        values = []
+        for row, col_dict in dod.items():
+            for col, val in col_dict.items():
+                rows.append(row)
+                cols.append(col)
+                values.append(self._print(val, **kwargs))
+        X_pt = X_pt[pt.as_tensor(rows), pt.as_tensor(cols)].set(values)
+        return X_pt
+
+    def _print_DenseMatrix(self, X, **kwargs):
+        """Print a dense matrix, choosing the appropriate method based on size and sparsity."""
+        n_elements = X.shape[0] * X.shape[1]
+        nnz = sum([x == 0 for L in X.tolist() for x in L])
+        sparsity = nnz / n_elements
+
+        if sparsity < 0.8 or n_elements < 100:
+            # For small matrices or dense matrices, use stacklists
+            return self._print_DenseMatrix_stacklists(X, **kwargs)
+
+        # If there are a lot of zeros, use the zeros and set_subtensor approach
+        return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
     def _print_SparseMatrix(self, X, **kwargs):
-        def dod_to_csr(dod):
-            data = []
-            idxs = []
-            pointers = [0]
-
-            for row in sorted(dod.keys()):
-                for col in sorted(dod[row].keys()):
-                    data.append(dod[row][col])
-                    idxs.append(col)
-                pointers.append(len(data))
-
-            max_row_index = max(dod.keys())
-            max_col_index = max(max(cols.keys()) for cols in dod.values())
-
-            shape = (max_row_index + 1, max_col_index + 1)
-
-            return data, idxs, pointers, shape
-
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod)
         data = [self._print(d) for d in data]
