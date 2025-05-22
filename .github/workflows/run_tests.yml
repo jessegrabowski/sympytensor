@@ -15,7 +15,7 @@ jobs:
             python-version: "3.13"
             test-subset: tests --benchmark-skip
           - os: ubuntu-latest
-            python-version: "3.12"
+            python-version: "3.13"
             test-subset: tests --benchmark-only
           - os: windows-latest
             python-version: "3.11"
@@ -32,7 +32,6 @@ jobs:
       with:
         environment-file: .github/conda_envs/sympytensor.yml
         micromamba-version: "latest"
-        python-version: ${{ matrix.python-version }}
         environment-name: sympytensor-test
         init-shell: bash
         cache-environment: true
