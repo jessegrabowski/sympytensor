@@ -31,6 +31,8 @@ jobs:
     - uses: mamba-org/setup-micromamba@v2
       with:
         environment-file: .github/conda_envs/sympytensor.yml
+        create-args: >-
+          python=${{matrix.python-version}}
         micromamba-version: "latest"
         environment-name: sympytensor-test
         init-shell: bash
@@ -43,7 +45,7 @@ jobs:
 
     - name: Run tests
       run: |
-        python -m pytest -vv --cov=sympytensor --cov-report=xml --no-cov-on-fail --cov-report term tests/
+        python -m pytest -vv --cov=sympytensor --cov-report=xml --no-cov-on-fail --cov-report term ${{ matrix.test-subset }}
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
