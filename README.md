@@ -135,7 +135,7 @@ rewrite_graph(s_pt)
 s_pt.dprint()
 ```
 
-The next code block shows the simplified graph. Note that constant folding has been applied, and powers of `x` that 
+The next code block shows the simplified graph. Note that constant folding has been applied, and powers of `x` that
 are used in multiple places are now longer computed multiple times (notice how `Pow [id L]` and `Pow [id O]` appear in
 several places)
 
@@ -228,7 +228,7 @@ A_inv = sp.matrices.Inverse(A).doit()
 `A_inv` is a sympy expression that computes each element in of the inverse of `A` symbolically:
 
 
-$$ 
+$$
 A^{-1} = \begin{pmatrix} \frac{d}{ad - bc} & -\frac{b}{ad - bc} \\ -\frac{c}{ad - bc} & \frac{a}{ad - bc} \end{pmatrix}
 $$
 
@@ -244,7 +244,7 @@ with pm.Model() as m:
     b_pm = pm.Normal('b')
     c_pm = pm.Normal('c')
     c_pm = pm.Normal('d')
-    
+
     # Transform the sympy expression to a pytensor graph, then insert the random variables into it
     A_inv_pm = SympyDeterministic('A_inv', A_inv)
 
