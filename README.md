@@ -1,10 +1,20 @@
 # Sympytensor
 
-A tool for converting Sympy expressions to a Pytensor graph, with support for working with PyMC models.
+Sympytensor converts sympy expressions to Pytensor graphs, with support for working with PyMC models. This allows you 
+to take advantage of sympy's symbolic computation capabilities together with pytensor's powerful symbolic graph 
+machinery.
 
 # Installation
 
-```text
+`sympytensor` is available on conda-forge, and can be installed with conda as follows:
+
+```bash
+conda install -c conda-forge sympytensor
+```
+
+Alternatively, it can be installed with pip:
+
+```bash
 pip install sympytensor
 ```
 
