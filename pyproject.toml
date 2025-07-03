@@ -43,11 +43,11 @@ dev = [
 source = 'vcs'
 
 [tool.hatch.build.hooks.vcs]
-version-file = "_version.py"
+version-file = "sympytensor/_version.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-  '/.github',
+  '.github',
 ]
 
 [tool.hatch.build.targets.wheel]
