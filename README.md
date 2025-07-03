@@ -1,7 +1,7 @@
 # Sympytensor
 
-Sympytensor converts sympy expressions to Pytensor graphs, with support for working with PyMC models. This allows you 
-to take advantage of sympy's symbolic computation capabilities together with pytensor's powerful symbolic graph 
+Sympytensor converts sympy expressions to Pytensor graphs, with support for working with PyMC models. This allows you
+to take advantage of sympy's symbolic computation capabilities together with pytensor's powerful symbolic graph
 machinery.
 
 # Installation
