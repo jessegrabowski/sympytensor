@@ -1,6 +1,6 @@
-from sympytensor._version import get_versions
+from importlib.metadata import version
 from sympytensor.pymc import SympyDeterministic
 from sympytensor.pytensor import as_tensor, pytensor_function
 
-__version__ = get_versions()["version"]
+__version__ = version("pymc-extras")
 __all__ = ["as_tensor", "pytensor_function", "SympyDeterministic"]

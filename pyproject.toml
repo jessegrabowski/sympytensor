@@ -1,10 +1,6 @@
 [build-system]
-requires = [
-    "numpy",
-    "setuptools",
-    "versioneer[toml]",
-]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = 'sympytensor'
@@ -41,18 +37,24 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
-    "versioneer",
 ]
 
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "sympytensor/_version.py"
-versionfile_build = "sympytensor/_version.py"
-tag_prefix = "v"
+[tool.hatch.version]
+source = 'vcs'
 
-[tool.setuptools]
-py-modules = ['sympytensor']
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  '/.github',
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sympytensor"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
