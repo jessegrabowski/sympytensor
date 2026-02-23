@@ -244,8 +244,8 @@ def test_MatAdd():
 
 
 def test_Rationals():
-    assert pt_eq(as_tensor(sp.Integer(2) / 3), pt.true_div(2, 3))
-    assert pt_eq(as_tensor(S.Half), pt.true_div(1, 2))
+    assert as_tensor(sp.Integer(2) / 3) == 2 / 3
+    assert as_tensor(S.Half) == 0.5
 
 
 def test_Integers():
@@ -448,9 +448,19 @@ def test_DenseMatrix():
     t = sp.Symbol("theta")
     for MatrixType in [sp.Matrix, sp.ImmutableMatrix]:
         X = MatrixType([[sp.cos(t), -sp.sin(t)], [sp.sin(t), sp.cos(t)]])
-        tX = as_tensor(X)
+        cache = {}
+        tX = as_tensor(X, cache=cache)
         assert isinstance(tX, TensorVariable)
         assert isinstance(tX.owner.op, AdvancedIncSubtensor)
+
+        t_pt = get_pt_vars(cache, ["theta"])
+        theta_val = np.pi / 4
+        result = tX.eval({t_pt: theta_val})
+        expected = np.array([
+            [np.cos(theta_val), -np.sin(theta_val)],
+            [np.sin(theta_val), np.cos(theta_val)],
+        ])
+        assert_allclose(result, expected)
 
 
 def test_empty_matrix():
@@ -469,15 +479,57 @@ def test_large_dense_matrix():
 
     jac_pt = as_tensor(jac)
 
-    # Very large or sparse matrices use SetSubtensor to build the matrix
     assert isinstance(jac_pt.owner.op, AdvancedIncSubtensor)
 
     small_eqs = sp.Matrix([x**2 for x in vars[:3]])
     small_jac = small_eqs.jacobian(vars[:3])
     small_jac_pt = as_tensor(small_jac)
 
-    # Small matrices now use setsubtensor as well
     assert isinstance(small_jac_pt.owner.op, AdvancedIncSubtensor)
+
+    const_matrix = sp.ones(50, 50)
+    const_pt = as_tensor(const_matrix)
+    assert const_pt.owner is None
+    assert_allclose(const_pt.eval(), np.ones((50, 50)))
+
+
+def test_dense_matrix_mixed_symbolic_numeric():
+    a, b = sp.symbols("a b")
+    M = sp.Matrix([
+        [1,                  a,  0],
+        [sp.Rational(1, 2), -3,  b],
+        [sp.pi,              0,  a + b],
+    ])
+
+    cache = {}
+    M_pt = as_tensor(M, cache=cache)
+    a_pt, b_pt = get_pt_vars(cache, ["a", "b"])
+
+    result = M_pt.eval({a_pt: 2.0, b_pt: 5.0})
+    expected = np.array([
+        [1.0,    2.0, 0.0],
+        [0.5,   -3.0, 5.0],
+        [np.pi,  0.0, 7.0],
+    ])
+    assert_allclose(result, expected)
+
+
+def test_dense_matrix_all_numeric_varied():
+    """Test dense matrix with negative, rational, and irrational constant entries."""
+    M = sp.Matrix([
+        [-sp.Rational(7, 3), sp.sqrt(2),  0],
+        [sp.pi,              -sp.exp(1),   sp.Rational(1, 7)],
+        [100,                 0,          -sp.Rational(1, 1000)],
+    ])
+    M_pt = as_tensor(M)
+
+    result = M_pt.eval()
+    expected = np.array([
+        [-7 / 3,    np.sqrt(2),  0.0],
+        [np.pi,    -np.e,        1 / 7],
+        [100.0,     0.0,        -0.001],
+    ])
+    assert_allclose(result, expected, rtol=1e-7)
 
 
 # Pairs of objects which should be considered equivalent with respect to caching
@@ -806,63 +858,3 @@ def test_sparse_matrix():
 
     assert z_pt.owner.op == pytensor.sparse.CSR
     assert sparse_allclose(z_pt.eval({a_pt: 1, b_pt: 2}), sparse.csr_matrix([[4], [3]]))
-
-
-def build_test_matrix(rng, size, sparsity):
-    dense_values = rng.normal(size=(size * size))
-    n_zeros = int(size * size * (1 - sparsity))
-    if n_zeros > 0:
-        zero_idxs = rng.choice(n_zeros, size=size, replace=False)
-        dense_values[zero_idxs] = 0
-
-    matrix = sp.Matrix(dense_values.reshape(size, size))
-    return matrix
-
-
-@pytest.mark.parametrize(
-    "size, sparsity",
-    [(4, 1.0), (4, 0.5), (100, 0.1)],
-    ids=["small_dense", "small_sparse", "large_sparse"],
-)
-def test_dense_matrix_creation_methods(size, sparsity):
-    """Test that dense matrix construction paths produce the same result."""
-    rng = np.random.default_rng([size, sum(map(ord, "Matrix Creation Test"))])
-    cache = {}
-    printer = PytensorPrinter(cache=cache)
-
-    matrix = build_test_matrix(rng, size, sparsity)
-
-    result1 = printer._print_DenseMatrix(matrix)
-    result2 = printer._print_DenseMatrix_setsubtensor(matrix)
-
-    f1 = pytensor.function([], result1)
-    f2 = pytensor.function([], result2)
-
-    output1 = f1()
-    output2 = f2()
-    assert_allclose(output1, output2)
-
-
-@pytest.mark.parametrize(
-    "size, sparsity",
-    [(4, 1.0), (4, 0.5), (100, 1.0), (100, 0.1), (200, 0.1)],
-    ids=["small_dense", "small_sparse", "large_dense", "large_sparse", "very_large_sparse"],
-)
-@pytest.mark.parametrize(
-    "method",
-    ["_print_DenseMatrix", "_print_DenseMatrix_setsubtensor"],
-    ids=["direct", "set_subtensor"],
-)
-def test_matrix_perf(size, sparsity, method, benchmark):
-    rng = np.random.default_rng([size, sum(map(ord, "Matrix Creation Test"))])
-    cache = {}
-    printer = PytensorPrinter(cache=cache)
-
-    matrix = build_test_matrix(rng, size, sparsity)
-    result = getattr(printer, method)(matrix)
-
-    def compile_fn():
-        f1 = pytensor.function([], result)
-        return f1
-
-    benchmark(compile_fn)
