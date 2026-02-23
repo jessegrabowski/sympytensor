@@ -9,6 +9,9 @@ from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.elemwise import Elemwise
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
+from pytensor import config
+import numpy as np
+
 
 mapping = {
     # Numbers
@@ -123,6 +126,20 @@ class PytensorPrinter(Printer):
         self.cache = kwargs.pop("cache", {})
         super().__init__(*args, **kwargs)
 
+    def _print(self, expr, **kwargs):
+        """Override base _print to add fast path for numeric types.
+
+        Numbers are converted directly without cache lookups, as they don't benefit
+        from caching and the overhead of cache key generation is significant.
+        """
+        if isinstance(expr, sp.Integer):
+            return expr.p
+
+        elif isinstance(expr, sp.Number) and not isinstance(expr, sp.Rational):
+            return float(expr.evalf())
+
+        return super()._print(expr, **kwargs)
+
     def _get_key(self, s, name=None, dtype=None, broadcastable=None):
         """Get the cache key for a SymPy object.
 
@@ -209,45 +226,82 @@ class PytensorPrinter(Printer):
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
-    def _print_DenseMatrix_stacklists(self, X, **kwargs):
-        """Create a matrix using stacklists approach."""
-        return pt.stacklists([[self._print(arg, **kwargs) for arg in L] for L in X.tolist()])
+    def _print_DenseMatrix_setsubtensor(self, X, **kwargs) -> pt.TensorVariable:
+        """Convert dense matrix to PyTensor using sparse updates to a zero matrix.
 
-    def _print_DenseMatrix_setsubtensor(self, X, **kwargs):
-        """Create a matrix using zeros and set_subtensor approach."""
-        dod = sp.SparseMatrix(X).todod()
-
+        Creates O(1) graph nodes regardless of matrix size. Preferred for matrices ≥10×10.
+        """
         X_pt = pt.zeros((X.shape[0], X.shape[1]))
-        rows = []
-        cols = []
-        values = []
-        for row, col_dict in dod.items():
-            for col, val in col_dict.items():
-                rows.append(row)
-                cols.append(col)
-                values.append(self._print(val, **kwargs))
-        X_pt = X_pt[pt.as_tensor(rows), pt.as_tensor(cols)].set(values)
-        return X_pt
 
-    def _print_DenseMatrix(self, X, **kwargs):
-        """Print a dense matrix, choosing the appropriate method based on size and sparsity."""
-        n_elements = X.shape[0] * X.shape[1]
-        nnz = sum([x == 0 for L in X.tolist() for x in L])
-        sparsity = nnz / n_elements
+        # Collect non-zero entries with their positions
+        entries = [
+            (idx // X.shape[1], idx % X.shape[1], val)
+            for idx, val in enumerate(X.flat())
+            if val != 0
+        ]
 
-        if sparsity < 0.8 or n_elements < 100:
-            # For small matrices or dense matrices, use stacklists
-            return self._print_DenseMatrix_stacklists(X, **kwargs)
+        if not entries:
+            return X_pt
 
-        # If there are a lot of zeros, use the zeros and set_subtensor approach
+        rows = [row for row, _, _ in entries]
+        cols = [col for _, col, _ in entries]
+        values_list = [val for _, _, val in entries]
+
+        # Check if all values are numeric constants for batch optimization
+        if all(isinstance(val, sp.Number) for val in values_list):
+            values = np.array([float(val.evalf()) for val in values_list])
+        else:
+            values = [self._print(val, **kwargs) for val in values_list]
+
+        return X_pt[pt.as_tensor(rows), pt.as_tensor(cols)].set(values)
+
+    def _print_DenseMatrix(self, X, **kwargs) -> pt.TensorVariable:
+        """Convert SymPy dense matrix to PyTensor variable.
+
+        Uses optimized conversion paths based on matrix properties:
+        - All-numeric: Direct numpy array conversion (fastest)
+        - Non-numeric: Sparse update via setsubtensor (constant graph size)
+
+        Parameters
+        ----------
+        X : sympy.matrices.dense.DenseMatrix
+            SymPy dense matrix to convert
+        **kwargs
+            Additional arguments passed to element printers (dtypes, broadcastables, etc.)
+
+        Returns
+        -------
+        pt.TensorVariable
+            PyTensor variable representing the matrix
+        """
+        try:
+            elements = list(X.flat())
+            if all(isinstance(elem, sp.Number) for elem in elements):
+                import numpy as np
+                arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
+                return pt.as_tensor_variable(arr.reshape(X.shape))
+        except (AttributeError, ValueError, TypeError):
+            pass
+
+        if not any(x != 0 for x in X.flat()):
+            return pt.zeros((X.shape[0], X.shape[1]))
+
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
-    def _print_SparseMatrix(self, X, **kwargs):
+    def _print_SparseMatrix(self, X, **kwargs) -> pytensor.sparse.basic.SparseTensorVariable:
+        """Convert SymPy sparse matrix to PyTensor CSR sparse variable.
+
+        Optimizes for all-numeric case by bypassing printer dispatch.
+        """
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod)
-        data = [self._print(d) for d in data]
+
+        if all(isinstance(d, sp.Number) for d in data):
+            data = [float(d.evalf()) for d in data]
+        else:
+            data = [self._print(d, **kwargs) for d in data]
 
         return pytensor.sparse.CSR(data, idxs, pointers, shape)
 
@@ -448,7 +502,9 @@ class PytensorPrinter(Printer):
 global_cache: dict[Any, Any] = {}
 
 
-def as_tensor(expr, cache=None, **kwargs):
+def as_tensor(expr,
+              cache=None,
+              **kwargs):
     """
     Convert a SymPy expression into a Pytensor graph variable.
 
