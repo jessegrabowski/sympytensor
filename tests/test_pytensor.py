@@ -1014,10 +1014,13 @@ def test_unknown_sympy_type_raises():
         as_tensor(UnknownFunc(x), cache={})
 
 
-def test_dod_to_csr_empty_raises():
-    """dod_to_csr should fail on an empty dictionary."""
-    with pytest.raises(ValueError, match="max"):
-        dod_to_csr({})
+def test_dod_to_csr_empty():
+    """dod_to_csr with an empty dict returns valid empty CSR."""
+    data, idxs, pointers, shape = dod_to_csr({}, shape=(3, 4))
+    assert data == []
+    assert idxs == []
+    assert pointers == [0, 0, 0, 0]
+    assert shape == (3, 4)
 
 
 def test_reduction_unsupported_op_raises():
@@ -1103,10 +1106,6 @@ def test_complex_dtype_propagation():
     assert result.type.dtype == "complex64"
 
 
-@pytest.mark.xfail(
-    reason="dod_to_csr does not insert pointers for rows with no data; shape inferred from max indices",
-    strict=True,
-)
 def test_sparse_matrix_with_empty_rows():
     """Sparse matrix with empty rows should still produce correct CSR."""
     a, b = sp.symbols("a b")
