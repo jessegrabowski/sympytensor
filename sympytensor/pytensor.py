@@ -341,30 +341,69 @@ class PytensorPrinter(Printer):
 
         return base[indices]
 
-    def _print_reduction(self, X, op: str = "sum", **kwargs):
+    def _print_reduction(self, X, op: str = "sum", **kwargs) -> pt.TensorVariable:
+        """Convert SymPy Sum/Product with indexed summands to PyTensor reduction.
+
+        Handles expressions like Sum(x[i, j, k], (i, 0, 10), (j, 0, 5)) by:
+        1. Slicing the base array along reduction dimensions
+        2. Summing/producting over the sliced dimensions
+
+        Parameters
+        ----------
+        X : sympy.concrete.expr_with_limits.ExprWithLimits
+            SymPy Sum or Product expression
+        op : str
+            Reduction operation: "sum" or "prod"
+        **kwargs
+            Additional arguments passed to element printers
+
+        Returns
+        -------
+        pt.TensorVariable
+            PyTensor reduction result
+        """
         summand, *sum_args = X.args
-        dim_names = [x.name for x in summand.indices]
+
         slice_dict = {
-            var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args
+            var.name: pt.make_slice(int(start), int(stop) + 1)
+            for var, start, stop in sum_args
         }
+
         summand_pt = self._print(summand, **kwargs)
         inputs = list(pytensor.graph.graph_inputs([summand_pt]))
+        inputs_by_name = {inp.name: inp for inp in inputs}
 
-        dims_pt = [x for x in inputs if x.name in dim_names]
+        # Preserve original index order from summand (graph traversal order is arbitrary)
+        dims_pt = [inputs_by_name[idx.name] for idx in summand.indices]
         base = [x for x in inputs if x.name == summand.base.name][0]
 
-        out_idx = [slice_dict.get(idx.name, idx) for i, idx in enumerate(dims_pt)]
-        sum_axes = [i for i, idx in enumerate(dims_pt) if idx.name in slice_dict]
+        out_idx = [slice_dict.get(idx.name, idx) for idx in dims_pt]
 
-        if op == "sum":
-            return pt.sum(base[tuple(out_idx)], axis=sum_axes)
-        elif op == "prod":
-            return pt.prod(base[tuple(out_idx)], axis=sum_axes)
+        # Track which output axes correspond to reduction dimensions
+        reduce_axis = []
+        output_axis = 0
+        for idx, idx_val in zip(dims_pt, out_idx):
+            if isinstance(idx_val, slice):
+                if idx.name in slice_dict:
+                    reduce_axis.append(output_axis)
+                output_axis += 1
 
-    def _print_Sum(self, X, **kwargs):
+        reduce_axis = tuple(reduce_axis) if reduce_axis else None
+
+        match op:
+            case "sum":
+                return pt.sum(base[tuple(out_idx)], axis=reduce_axis)
+            case "prod":
+                return pt.prod(base[tuple(out_idx)], axis=reduce_axis)
+            case _:
+                raise NotImplementedError(f"Unsupported reduction operation '{op}'. Supported ops: 'sum', 'prod'.")
+
+    def _print_Sum(self, X, **kwargs) -> pt.TensorVariable:
+        """Convert SymPy Sum to PyTensor sum reduction."""
         return self._print_reduction(X, op="sum", **kwargs)
 
-    def _print_Product(self, X, **kwargs):
+    def _print_Product(self, X, **kwargs) -> pt.TensorVariable:
+        """Convert SymPy Product to PyTensor prod reduction."""
         return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
