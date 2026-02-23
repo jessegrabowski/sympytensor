@@ -128,14 +128,11 @@ class PytensorPrinter(Printer):
 
     def _print(self, expr, **kwargs):
         """Override base _print to add fast path for numeric types.
-
-        Numbers are converted directly without cache lookups, as they don't benefit
-        from caching and the overhead of cache key generation is significant.
         """
         if isinstance(expr, sp.Integer):
             return expr.p
 
-        elif isinstance(expr, sp.Number) and not isinstance(expr, sp.Rational):
+        if isinstance(expr, sp.Basic) and expr.is_number and expr.is_real is not False:
             return float(expr.evalf())
 
         return super()._print(expr, **kwargs)
@@ -199,9 +196,6 @@ class PytensorPrinter(Printer):
         children = [self._print(arg, **kwargs) for arg in expr.args]
         return op(*children)
 
-    def _print_Number(self, n, **kwargs):
-        # Integers already taken care of below, interpret as float
-        return float(n.evalf())
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
@@ -227,40 +221,41 @@ class PytensorPrinter(Printer):
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
     def _print_DenseMatrix_setsubtensor(self, X, **kwargs) -> pt.TensorVariable:
-        """Convert dense matrix to PyTensor using sparse updates to a zero matrix.
+        """Convert dense matrix to PyTensor using a constant base with symbolic overlays.
 
-        Creates O(1) graph nodes regardless of matrix size. Preferred for matrices ≥10×10.
+        Fills all numeric values into a numpy array upfront, then applies a single
+        set() operation for any symbolic entries. This minimizes graph nodes to O(n_symbolic)
+        instead of O(n_nonzero).
         """
-        X_pt = pt.zeros((X.shape[0], X.shape[1]))
+        nrows, ncols = X.shape
+        base = np.zeros((nrows, ncols), dtype=config.floatX)
 
-        # Collect non-zero entries with their positions
-        entries = [
-            (idx // X.shape[1], idx % X.shape[1], val)
-            for idx, val in enumerate(X.flat())
-            if val != 0
-        ]
+        sym_rows = []
+        sym_cols = []
+        sym_values = []
 
-        if not entries:
+        for idx, val in enumerate(X.flat()):
+            row, col = divmod(idx, ncols)
+            if isinstance(val, sp.Basic) and val.is_number:
+                base[row, col] = float(val.evalf())
+            elif val != 0:
+                sym_rows.append(row)
+                sym_cols.append(col)
+                sym_values.append(self._print(val, **kwargs))
+
+        X_pt = pt.as_tensor_variable(base)
+
+        if not sym_values:
             return X_pt
 
-        rows = [row for row, _, _ in entries]
-        cols = [col for _, col, _ in entries]
-        values_list = [val for _, _, val in entries]
-
-        # Check if all values are numeric constants for batch optimization
-        if all(isinstance(val, sp.Number) for val in values_list):
-            values = np.array([float(val.evalf()) for val in values_list])
-        else:
-            values = [self._print(val, **kwargs) for val in values_list]
-
-        return X_pt[pt.as_tensor(rows), pt.as_tensor(cols)].set(values)
+        return X_pt[pt.as_tensor(sym_rows), pt.as_tensor(sym_cols)].set(sym_values)
 
     def _print_DenseMatrix(self, X, **kwargs) -> pt.TensorVariable:
         """Convert SymPy dense matrix to PyTensor variable.
 
         Uses optimized conversion paths based on matrix properties:
-        - All-numeric: Direct numpy array conversion (fastest)
-        - Non-numeric: Sparse update via setsubtensor (constant graph size)
+        - All-numeric: Direct numpy array conversion (fastest, no graph ops)
+        - Mixed symbolic/numeric: Constant base with symbolic overlays via setsubtensor
 
         Parameters
         ----------
@@ -276,15 +271,11 @@ class PytensorPrinter(Printer):
         """
         try:
             elements = list(X.flat())
-            if all(isinstance(elem, sp.Number) for elem in elements):
-                import numpy as np
+            if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
                 arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
                 return pt.as_tensor_variable(arr.reshape(X.shape))
         except (AttributeError, ValueError, TypeError):
             pass
-
-        if not any(x != 0 for x in X.flat()):
-            return pt.zeros((X.shape[0], X.shape[1]))
 
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
@@ -298,7 +289,7 @@ class PytensorPrinter(Printer):
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod)
 
-        if all(isinstance(d, sp.Number) for d in data):
+        if all(isinstance(d, sp.Basic) and d.is_number for d in data):
             data = [float(d.evalf()) for d in data]
         else:
             data = [self._print(d, **kwargs) for d in data]
@@ -447,8 +438,6 @@ class PytensorPrinter(Printer):
             ]
         )
 
-    def _print_Pi(self, expr, **kwargs):
-        return 3.141592653589793
 
     def _print_Piecewise(self, expr, **kwargs):
         import numpy as np
@@ -468,8 +457,6 @@ class PytensorPrinter(Printer):
         p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
         return pt.switch(p_cond, p_e, p_remaining)
 
-    def _print_Rational(self, expr, **kwargs):
-        return pt.true_div(self._print(expr.p, **kwargs), self._print(expr.q, **kwargs))
 
     def _print_Integer(self, expr, **kwargs):
         return expr.p
