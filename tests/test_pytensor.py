@@ -443,19 +443,24 @@ def test_BlockMatrix():
 
 
 def test_DenseMatrix():
-    from pytensor.tensor.basic import Join
+    from pytensor.tensor.subtensor import AdvancedIncSubtensor
 
     t = sp.Symbol("theta")
     for MatrixType in [sp.Matrix, sp.ImmutableMatrix]:
         X = MatrixType([[sp.cos(t), -sp.sin(t)], [sp.sin(t), sp.cos(t)]])
         tX = as_tensor(X)
         assert isinstance(tX, TensorVariable)
-        assert isinstance(tX.owner.op, Join)
+        assert isinstance(tX.owner.op, AdvancedIncSubtensor)
+
+
+def test_empty_matrix():
+    X = sp.Matrix([[0 for _ in range(20)] for _ in range(20)])
+    tX = as_tensor(X)
+    assert np.allclose(tX.eval(), np.zeros((20, 20)))
 
 
 def test_large_dense_matrix():
     from pytensor.tensor.subtensor import AdvancedIncSubtensor
-    from pytensor.tensor.basic import Join
 
     vars = [sp.Symbol(f"x_{i}") for i in range(100)]
 
@@ -471,8 +476,8 @@ def test_large_dense_matrix():
     small_jac = small_eqs.jacobian(vars[:3])
     small_jac_pt = as_tensor(small_jac)
 
-    # Small matrices use join to directly stack the vectors
-    assert isinstance(small_jac_pt.owner.op, Join)
+    # Small matrices now use setsubtensor as well
+    assert isinstance(small_jac_pt.owner.op, AdvancedIncSubtensor)
 
 
 # Pairs of objects which should be considered equivalent with respect to caching
@@ -820,14 +825,14 @@ def build_test_matrix(rng, size, sparsity):
     ids=["small_dense", "small_sparse", "large_sparse"],
 )
 def test_dense_matrix_creation_methods(size, sparsity):
-    """Test that both methods for creating dense matrices produce the same result."""
+    """Test that dense matrix construction paths produce the same result."""
     rng = np.random.default_rng([size, sum(map(ord, "Matrix Creation Test"))])
     cache = {}
     printer = PytensorPrinter(cache=cache)
 
     matrix = build_test_matrix(rng, size, sparsity)
 
-    result1 = printer._print_DenseMatrix_stacklists(matrix)
+    result1 = printer._print_DenseMatrix(matrix)
     result2 = printer._print_DenseMatrix_setsubtensor(matrix)
 
     f1 = pytensor.function([], result1)
@@ -845,7 +850,7 @@ def test_dense_matrix_creation_methods(size, sparsity):
 )
 @pytest.mark.parametrize(
     "method",
-    ["_print_DenseMatrix_stacklists", "_print_DenseMatrix_setsubtensor"],
+    ["_print_DenseMatrix", "_print_DenseMatrix_setsubtensor"],
     ids=["direct", "set_subtensor"],
 )
 def test_matrix_perf(size, sparsity, method, benchmark):
