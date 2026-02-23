@@ -590,7 +590,7 @@ def pytensor_function(
     ========
 
     >>> from sympy.abc import x, y, z
-    >>> from sympytensor.printing import pytensor_function
+    >>> from sympytensor.pytensor import pytensor_function
 
     A simple function with one input and one output:
 
