@@ -5,9 +5,9 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
+from pytensor.graph.basic import equal_computations
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot
 from pytensor.tensor.variable import TensorVariable
 from scipy import sparse
 
@@ -15,7 +15,7 @@ import sympy as sp
 from sympy.abc import t, x, y, z
 from sympy.core.singleton import S
 
-from sympytensor.pytensor import as_tensor, dim_handling, pytensor_function, PytensorPrinter
+from sympytensor.pytensor import as_tensor, dim_handling, dod_to_csr, pytensor_function, PytensorPrinter
 
 
 xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
@@ -80,68 +80,43 @@ def pytensor_simplify(fgraph):
     return fgraph
 
 
-def pt_eq(a, b):
-    """Test two Pytensor objects for equality.
-
-    Also accepts numeric types and lists/tuples of supported types.
-
-    Note - debugprint() has a bug where it will accept numeric types but does
-    not respect the "file" argument and in this case and instead prints the number
-    to stdout and returns an empty string. This can lead to tests passing where
-    they should fail because any two numbers will always compare as equal. To
-    prevent this we treat numbers as a separate case.
-    """
-    numeric_types = (int, float, np.number)
-    a_is_num = isinstance(a, numeric_types)
-    b_is_num = isinstance(b, numeric_types)
-
-    # Compare numeric types using regular equality
-    if a_is_num or b_is_num:
-        if not (a_is_num and b_is_num):
-            return False
-
-        return a == b
-
-    # Compare sequences element-wise
-    a_is_seq = isinstance(a, (tuple, list))
-    b_is_seq = isinstance(b, (tuple, list))
-
-    if a_is_seq or b_is_seq:
-        if not (a_is_seq and b_is_seq) or not (isinstance(a, type(b))):
-            return False
-
-        return list(map(pt_eq, a)) == list(map(pt_eq, b))
-
-    # Otherwise, assume debugprint() can handle it
-    astr = pytensor.printing.debugprint(a, file="str")
-    bstr = pytensor.printing.debugprint(b, file="str")
-
-    # Check for bug mentioned above
-    for argname, argval, argstr in [("a", a, astr), ("b", b, bstr)]:
-        if argstr == "":
-            raise TypeError(
-                "aesara.printing.debugprint(%s) returned empty string "
-                "(%s is instance of %r)" % (argname, argname, type(argval))
-            )
-
-    return astr == bstr
+def assert_graph_equal(actual, expected, in_actual=None, in_expected=None):
+    """Assert two PyTensor graphs represent the same computation."""
+    xs = [actual] if not isinstance(actual, list) else actual
+    ys = [expected] if not isinstance(expected, list) else expected
+    assert equal_computations(xs, ys, in_xs=in_actual, in_ys=in_expected), (
+        f"Graphs are not equal.\n"
+        f"  Actual:   {pytensor.printing.debugprint(actual, file='str')}\n"
+        f"  Expected: {pytensor.printing.debugprint(expected, file='str')}"
+    )
 
 
-def test_constants():
-    """Test that constants are printed correctly."""
+def test_numeric_constant_conversion():
+    """Test that SymPy numeric constants convert to correct Python values."""
     float_one = sp.Float(1.0)
     int_one = sp.Integer(1)
     assert as_tensor(int_one) == 1
     assert as_tensor(float_one) == 1.0
 
 
-@pytest.mark.parametrize("pt_obj, sp_obj", zip([xt, yt, zt, Xt, Yt, Zt], [x, y, z, X, Y, Z]))
-def test_example_symbols(pt_obj, sp_obj):
-    """
-    Check that the example symbols in this module print to their Aesara
-    equivalents, as many of the other tests depend on this.
-    """
-    assert pt_eq(pt_obj, as_tensor(sp_obj))
+@pytest.mark.parametrize(
+    "sp_obj, expected_name, expected_ndim",
+    [
+        (x, "x", 0),
+        (y, "y", 0),
+        (z, "z", 0),
+        (X, "X", 2),
+        (Y, "Y", 2),
+        (Z, "Z", 2),
+    ],
+    ids=["x", "y", "z", "X", "Y", "Z"],
+)
+def test_symbol_roundtrip_to_pytensor(sp_obj, expected_name, expected_ndim):
+    """Check that SymPy symbols print to correctly named PyTensor variables."""
+    cache = {}
+    result = as_tensor(sp_obj, cache=cache)
+    assert result.name == expected_name
+    assert result.type.ndim == expected_ndim
 
 
 def test_Symbol():
@@ -172,17 +147,129 @@ def test_add():
     assert comp.owner.op == pytensor.tensor.add
 
 
-@pytest.mark.parametrize("f_sp, f_pt", [(sp.sin, pt.sin), (sp.tan, pt.tan)], ids=["sin", "tan"])
-def test_trig(f_sp, f_pt):
-    assert pt_eq(as_tensor(f_sp(x)), f_pt(xt))
+@pytest.mark.parametrize(
+    "f_sp, f_pt",
+    [
+        (sp.Abs, pt.abs),
+        (sp.sign, pt.sgn),
+        (sp.ceiling, pt.ceil),
+        (sp.floor, pt.floor),
+        (sp.cos, pt.cos),
+        (sp.acos, pt.arccos),
+        (sp.sin, pt.sin),
+        (sp.asin, pt.arcsin),
+        (sp.tan, pt.tan),
+        (sp.atan, pt.arctan),
+        (sp.cosh, pt.cosh),
+        (sp.acosh, pt.arccosh),
+        (sp.sinh, pt.sinh),
+        (sp.asinh, pt.arcsinh),
+        (sp.tanh, pt.tanh),
+        (sp.atanh, pt.arctanh),
+        (sp.erf, pt.erf),
+        (sp.gamma, pt.gamma),
+        (sp.loggamma, pt.gammaln),
+        (sp.log, pt.log),
+        (sp.exp, pt.exp),
+    ],
+    ids=lambda f: getattr(f, "__name__", str(f)),
+)
+def test_unary_mapping(f_sp, f_pt):
+    """Test that each unary SymPy function maps to the correct PyTensor op."""
+    cache = {}
+    result = as_tensor(f_sp(x), cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_graph_equal(result, f_pt(x_pt))
+
+
+@pytest.mark.parametrize(
+    "f_sp, f_pt",
+    [
+        (sp.Max, pt.maximum),
+        (sp.Min, pt.minimum),
+        (sp.atan2, pt.arctan2),
+    ],
+    ids=["Max", "Min", "atan2"],
+)
+def test_binary_mapping(f_sp, f_pt):
+    """Test that each binary SymPy function maps to the correct PyTensor op."""
+    cache = {}
+    result = as_tensor(f_sp(x, y), cache=cache)
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    assert_graph_equal(result, f_pt(x_pt, y_pt))
+
+
+@pytest.mark.parametrize(
+    "f_sp, f_pt",
+    [
+        (sp.re, pt.real),
+        (sp.im, pt.imag),
+        (sp.arg, pt.angle),
+    ],
+    ids=["re", "im", "arg"],
+)
+def test_complex_unary_mapping(f_sp, f_pt):
+    """Test SymPy complex-valued unary functions (require complex dtype to avoid simplification)."""
+    cache = {}
+    result = as_tensor(f_sp(x), cache=cache, dtypes={x: "complex128"})
+    x_pt = get_pt_vars(cache, "x")
+    assert_graph_equal(result, f_pt(x_pt))
+
+
+def test_logical_not():
+    """Test sp.Not maps to pt.invert (use boolean symbol to prevent SymPy simplification)."""
+    p = sp.Symbol("p")
+    cache = {}
+    result = as_tensor(sp.Not(p), cache=cache, dtypes={p: "bool"})
+    p_pt = get_pt_vars(cache, "p")
+    assert_graph_equal(result, pt.invert(p_pt))
+
+
+def test_logical_xor():
+    """Test sp.Xor maps to pt.bitwise_xor."""
+    p, q = sp.symbols("p q")
+    cache = {}
+    result = as_tensor(sp.Xor(p, q), cache=cache, dtypes={p: "bool", q: "bool"})
+    p_pt, q_pt = get_pt_vars(cache, ["p", "q"])
+    assert_graph_equal(result, pt.bitwise_xor(p_pt, q_pt))
+
+
+def test_Trace():
+    """Test sp.Trace maps to pt.linalg.trace."""
+    A = sp.MatrixSymbol("A", 3, 3)
+    cache = {}
+    result = as_tensor(sp.Trace(A), cache=cache)
+    A_pt = get_pt_vars(cache, "A")
+    assert_graph_equal(result, pt.linalg.trace(A_pt))
+
+
+def test_Determinant():
+    """Test sp.Determinant maps to pt.linalg.det."""
+    A = sp.MatrixSymbol("A", 3, 3)
+    cache = {}
+    result = as_tensor(sp.Determinant(A), cache=cache)
+    A_pt = get_pt_vars(cache, "A")
+    assert_graph_equal(result, pt.linalg.det(A_pt))
+
+
+def test_HadamardProduct():
+    """Test sp.HadamardProduct maps to elementwise multiplication."""
+    A = sp.MatrixSymbol("A", 3, 3)
+    B = sp.MatrixSymbol("B", 3, 3)
+    cache = {}
+    result = as_tensor(sp.HadamardProduct(A, B), cache=cache)
+    A_pt, B_pt = get_pt_vars(cache, ["A", "B"])
+    assert_graph_equal(result, A_pt * B_pt)
 
 
 def test_complex_expression():
     """Test printing a complex expression with multiple symbols."""
     expr = sp.exp(x**2 + sp.cos(y)) * sp.log(2 * z)
-    comp = as_tensor(expr)
-    expected = pt.exp(xt**2 + pt.cos(yt)) * pt.log(2 * zt)
-    assert pt_eq(comp, expected)
+    cache = {}
+    comp = as_tensor(expr, cache=cache)
+    x_pt, y_pt, z_pt = get_pt_vars(cache, ["x", "y", "z"])
+    expected = pt.exp(x_pt**2 + pt.cos(y_pt)) * pt.log(2 * z_pt)
+    assert_graph_equal(comp, expected)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64", "int8", "int16", "int32", "int64"])
@@ -229,9 +316,11 @@ def test_broadcasting(bc1, bc2, bc3):
 
 def test_MatMul():
     expr = X * Y * Z
-    expr_t = as_tensor(expr)
-    assert isinstance(expr_t.owner.op, Dot)
-    assert pt_eq(expr_t, Xt.dot(Yt).dot(Zt))
+    cache = {}
+    expr_t = as_tensor(expr, cache=cache)
+    Xt, Yt, Zt = get_pt_vars(cache, ["X", "Y", "Z"])
+    expected = pt.dot(pt.dot(Xt, Yt), Zt)
+    assert_graph_equal(expr_t, expected)
 
 
 def test_Transpose():
@@ -263,9 +352,11 @@ def test_Derivative():
     def simp(expr):
         return pytensor_simplify(fgraph_of(expr))
 
-    assert pt_eq(
-        simp(as_tensor(sp.Derivative(sp.sin(x), x, evaluate=False))),
-        simp(pytensor.grad(pt.sin(xt), xt)),
+    fg_actual = simp(as_tensor(sp.Derivative(sp.sin(x), x, evaluate=False)))
+    fg_expected = simp(pytensor.grad(pt.sin(xt), xt))
+    assert equal_computations(
+        fg_actual.outputs, fg_expected.outputs,
+        in_xs=list(fg_actual.inputs), in_ys=list(fg_expected.inputs),
     )
 
 
@@ -392,20 +483,27 @@ def test_pytensor_function_raises_on_bad_kwarg():
 def test_slice():
     assert as_tensor(slice(1, 2, 3)) == slice(1, 2, 3)
 
-    def pt_eq_slice(s1, s2):
+    def assert_slice_equal(s1, s2):
         for attr in ["start", "stop", "step"]:
             a1 = getattr(s1, attr)
             a2 = getattr(s2, attr)
             if a1 is None or a2 is None:
-                if not (a1 is None or a2 is None):
-                    return False
-            elif not pt_eq(a1, a2):
-                return False
-        return True
+                assert a1 is None and a2 is None, f"slice.{attr} mismatch: {a1} vs {a2}"
+            elif isinstance(a1, TensorVariable) and isinstance(a2, TensorVariable):
+                assert_graph_equal(a1, a2)
+            else:
+                assert a1 == a2, f"slice.{attr} mismatch: {a1} vs {a2}"
 
     dtypes = {x: "int32", y: "int32"}
-    assert pt_eq_slice(as_tensor(slice(x, y), dtypes=dtypes), slice(xt, yt))
-    assert pt_eq_slice(as_tensor(slice(1, x, 3), dtypes=dtypes), slice(1, xt, 3))
+    cache = {}
+    actual_slice = as_tensor(slice(x, y), dtypes=dtypes, cache=cache)
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    assert_slice_equal(actual_slice, slice(x_pt, y_pt))
+
+    cache = {}
+    actual_slice = as_tensor(slice(1, x, 3), dtypes=dtypes, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_slice_equal(actual_slice, slice(1, x_pt, 3))
 
 
 def test_MatrixSlice():
@@ -432,14 +530,15 @@ def test_MatrixSlice():
 def test_BlockMatrix():
     n = sp.Symbol("n", integer=True)
     A, B, C, D = (sp.MatrixSymbol(name, n, n) for name in "ABCD")
-    At, Bt, Ct, Dt = map(as_tensor, (A, B, C, D))
+    cache = {}
     Block = sp.BlockMatrix([[A, B], [C, D]])
-    Blockt = as_tensor(Block)
+    Blockt = as_tensor(Block, cache=cache)
+    At, Bt, Ct, Dt = get_pt_vars(cache, ["A", "B", "C", "D"])
     solutions = [
         pt.join(0, pt.join(1, At, Bt), pt.join(1, Ct, Dt)),
         pt.join(1, pt.join(0, At, Ct), pt.join(0, Bt, Dt)),
     ]
-    assert any(pt_eq(Blockt, solution) for solution in solutions)
+    assert any(equal_computations([Blockt], [sol]) for sol in solutions)
 
 
 def test_DenseMatrix():
@@ -604,10 +703,16 @@ def test_symbols_are_created_once():
     more than once.
     """
     expr = sp.Add(x, x, evaluate=False)
-    comp = as_tensor(expr)
+    cache = {}
+    comp = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
 
-    assert pt_eq(comp, xt + xt)
-    assert not pt_eq(comp, xt + as_tensor(x))
+    # The graph should use the same variable twice (x_pt + x_pt)
+    assert_graph_equal(comp, x_pt + x_pt)
+
+    # A separately-created x variable should NOT match (different identity)
+    x_other = pt.scalar("x", dtype="floatX")
+    assert not equal_computations([comp], [x_pt + x_other])
 
 
 def test_cache_complex():
@@ -637,42 +742,64 @@ def test_cache_complex():
 def test_Piecewise():
     # A piecewise linear
     expr = sp.Piecewise((0, x < 0), (x, x < 2), (1, True))  # ___/III
-    result = as_tensor(expr)
+    cache = {}
+    result = as_tensor(expr, cache=cache)
     assert result.owner.op == pt.switch
+    x_pt = get_pt_vars(cache, "x")
+    expected = pt.switch(x_pt < 0, 0, pt.switch(x_pt < 2, x_pt, 1))
+    assert_graph_equal(result, expected)
 
-    expected = pt.switch(xt < 0, 0, pt.switch(xt < 2, xt, 1))
-    assert pt_eq(result, expected)
-
+    cache = {}
     expr = sp.Piecewise((x, x < 0))
-    result = as_tensor(expr)
-    expected = pt.switch(xt < 0, xt, np.nan)
-    assert pt_eq(result, expected)
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    expected = pt.switch(x_pt < 0, x_pt, np.nan)
+    assert_graph_equal(result, expected)
 
+    cache = {}
     expr = sp.Piecewise((0, sp.And(x > 0, x < 2)), (x, sp.Or(x > 2, x < 0)))
-    result = as_tensor(expr)
-    expected = pt.switch(pt.and_(xt > 0, xt < 2), 0, pt.switch(pt.or_(xt > 2, xt < 0), xt, np.nan))
-    assert pt_eq(result, expected)
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    expected = pt.switch(pt.and_(x_pt > 0, x_pt < 2), 0, pt.switch(pt.or_(x_pt > 2, x_pt < 0), x_pt, np.nan))
+    assert_graph_equal(result, expected)
 
 
-def test_Relationals():
-    assert pt_eq(as_tensor(sp.Eq(x, y)), pt.eq(xt, yt))
-    assert pt_eq(as_tensor(sp.Ne(x, y)), pt.neq(xt, yt))
-    assert pt_eq(as_tensor(x > y), xt > yt)
-    assert pt_eq(as_tensor(x < y), xt < yt)
-    assert pt_eq(as_tensor(x >= y), xt >= yt)
-    assert pt_eq(as_tensor(x <= y), xt <= yt)
+@pytest.mark.parametrize(
+    "sp_rel, pt_rel_fn",
+    [
+        (lambda x, y: sp.Eq(x, y), pt.eq),
+        (lambda x, y: sp.Ne(x, y), pt.neq),
+        (lambda x, y: x > y, pt.gt),
+        (lambda x, y: x < y, pt.lt),
+        (lambda x, y: x >= y, pt.ge),
+        (lambda x, y: x <= y, pt.le),
+    ],
+    ids=["Eq", "Ne", "Gt", "Lt", "Ge", "Le"],
+)
+def test_relational(sp_rel, pt_rel_fn):
+    """Test each SymPy relational maps to the correct PyTensor comparison."""
+    cache = {}
+    result = as_tensor(sp_rel(x, y), cache=cache)
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    assert_graph_equal(result, pt_rel_fn(x_pt, y_pt))
 
 
-def test_complexfunctions():
+def test_complex_number_operations():
+    """Test conjugate and imaginary literal conversion."""
     from sympy.functions.elementary.complexes import conjugate
 
-    atv = pt.as_tensor_variable
-    cplx = pt.complex
     dtypes = {x: "complex128", y: "complex128"}
-    xt, yt = as_tensor(x, dtypes=dtypes), as_tensor(y, dtypes=dtypes)
 
-    assert pt_eq(as_tensor(y * conjugate(x), dtypes=dtypes), yt * (xt.conj()))
-    assert pt_eq(as_tensor((1 + 2j) * x), xt * (atv(1.0) + atv(2.0) * cplx(0, 1)))
+    cache = {}
+    result = as_tensor(y * conjugate(x), dtypes=dtypes, cache=cache)
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    assert_graph_equal(result, y_pt * x_pt.conj())
+
+    cache = {}
+    result = as_tensor((1 + 2j) * x, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    expected = x_pt * (pt.as_tensor_variable(1.0) + pt.as_tensor_variable(2.0) * pt.complex(0, 1))
+    assert_graph_equal(result, expected)
 
 
 def test_constant_functions():
@@ -858,3 +985,136 @@ def test_sparse_matrix():
 
     assert z_pt.owner.op == pytensor.sparse.CSR
     assert sparse_allclose(z_pt.eval({a_pt: 1, b_pt: 2}), sparse.csr_matrix([[4], [3]]))
+
+
+def test_MatPow_positive_integer():
+    """Test _print_MatPow with a valid positive integer exponent."""
+    A = sp.MatrixSymbol("A", 3, 3)
+    cache = {}
+    result = as_tensor(A**2, cache=cache)
+    A_pt = get_pt_vars(cache, "A")
+    expected = pt.dot(pt.dot(1, A_pt), A_pt)
+    assert_graph_equal(result, expected)
+
+
+def test_MatPow_negative_exponent_raises():
+    """_print_MatPow should raise NotImplementedError for negative exponents."""
+    A = sp.MatrixSymbol("A", 3, 3)
+    with pytest.raises(NotImplementedError, match="non-negative integer"):
+        as_tensor(sp.MatPow(A, sp.Integer(-2)), cache={})
+
+
+def test_unknown_sympy_type_raises():
+    """_print_Basic should KeyError on unmapped SymPy types."""
+
+    class UnknownFunc(sp.Function):
+        pass
+
+    with pytest.raises(KeyError):
+        as_tensor(UnknownFunc(x), cache={})
+
+
+def test_dod_to_csr_empty_raises():
+    """dod_to_csr should fail on an empty dictionary."""
+    with pytest.raises(ValueError, match="max"):
+        dod_to_csr({})
+
+
+def test_reduction_unsupported_op_raises():
+    """_print_reduction should raise NotImplementedError for unknown ops."""
+    i = sp.Idx("i")
+    expr = sp.Sum(sp.IndexedBase("x")[i], (i, 0, 5))
+    printer = PytensorPrinter(cache={}, settings={})
+    with pytest.raises(NotImplementedError, match="Unsupported reduction operation"):
+        printer._print_reduction(expr, op="mean")
+
+
+def test_emptyPrinter_passthrough():
+    """emptyPrinter should return its argument unchanged."""
+    printer = PytensorPrinter(cache={}, settings={})
+    sentinel = object()
+    assert printer.emptyPrinter(sentinel) is sentinel
+
+
+# ============================================================
+# Edge case tests (audit priority 4)
+# ============================================================
+
+
+def test_1x1_matrix():
+    """A 1×1 matrix should still produce a 2-d tensor."""
+    M = sp.Matrix([[x]])
+    cache = {}
+    M_pt = as_tensor(M, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert M_pt.type.ndim == 2
+    assert M_pt.type.shape == (1, 1)
+    assert_allclose(M_pt.eval({x_pt: 7.0}), [[7.0]])
+
+
+def test_large_integer():
+    """Very large SymPy integers should convert without error."""
+    big = sp.Integer(10**100)
+    result = as_tensor(big)
+    assert result == 10**100
+
+
+def test_nested_piecewise():
+    """Piecewise inside another Piecewise should produce nested switches."""
+    inner = sp.Piecewise((x, x > 0), (0, True))
+    outer = sp.Piecewise((inner, y > 0), (-1, True))
+    cache = {}
+    result = as_tensor(outer, cache=cache)
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    expected = pt.switch(y_pt > 0, pt.switch(x_pt > 0, x_pt, 0), -1)
+    assert_graph_equal(result, expected)
+
+
+def test_piecewise_single_true():
+    """Piecewise with a single (expr, True) pair should produce just the expression."""
+    expr = sp.Piecewise((x**2, True))
+    cache = {}
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    # True is printed as 1 (an int), so switch(1, x**2, nan) — evaluates to x**2
+    assert_allclose(result.eval({x_pt: 3.0}), 9.0)
+
+
+def test_identity_matrix():
+    """sp.eye(n) should convert to an identity matrix constant."""
+    M_pt = as_tensor(sp.eye(4), cache={})
+    assert M_pt.type.ndim == 2
+    assert_allclose(M_pt.eval(), np.eye(4))
+
+
+def test_negative_literal_index():
+    """Indexing with a negative literal should work like NumPy."""
+    xb = sp.IndexedBase("x", shape=(10,))
+    cache = {}
+    result = as_tensor(xb[-1], cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_allclose(result.eval({x_pt: np.arange(10, dtype="float64")}), 9.0)
+
+
+def test_complex_dtype_propagation():
+    """Complex dtypes should propagate through unary ops."""
+    cache = {}
+    result = as_tensor(sp.sin(x), cache=cache, dtypes={x: "complex64"})
+    assert result.type.dtype == "complex64"
+
+
+@pytest.mark.xfail(
+    reason="dod_to_csr does not insert pointers for rows with no data; shape inferred from max indices",
+    strict=True,
+)
+def test_sparse_matrix_with_empty_rows():
+    """Sparse matrix with empty rows should still produce correct CSR."""
+    a, b = sp.symbols("a b")
+    S = sp.SparseMatrix(3, 3, {(0, 1): a, (2, 0): b})
+    cache = {}
+    S_pt = as_tensor(S, cache=cache)
+    a_pt, b_pt = get_pt_vars(cache, ["a", "b"])
+    result = S_pt.eval({a_pt: 5.0, b_pt: 7.0})
+    expected = np.array([[0, 5, 0], [0, 0, 0], [7, 0, 0]], dtype="float64")
+    assert_allclose(result.toarray(), expected)
+
