@@ -158,14 +158,6 @@ def test_MatrixSymbol():
     assert XX.type.broadcastable == (False, False)
 
 
-#
-# @pytest.mark.parametrize('shape',  [(), (10,), (None,), (None, 10), (10, None), (None, None)])
-# def test_MatrixSymbol_wrong_dims(shape):
-#     """ Test MatrixSymbol with invalid broadcastable. """
-#     with raises(ValueError):
-#         pytensor_code(X, shapes={X:shape})
-
-
 def test_AppliedUndef():
     """Test printing AppliedUndef instance, which works similarly to Symbol."""
     ftt = as_tensor(f_t)
@@ -300,7 +292,7 @@ def test_pytensor_function_matches_numpy():
 
 
 @pytest.mark.parametrize("n_out, scalar", [(1, True), (1, False), (2, False)])
-def test_pytensor_matrix_funciton_matches_numpy(n_out, scalar):
+def test_pytensor_matrix_function_matches_numpy(n_out, scalar):
     m = sp.Matrix([[x, y], [z, x + y + z]])
     expected = np.array([[1.0, 2.0], [3.0, 1.0 + 2.0 + 3.0]])
 
@@ -472,7 +464,7 @@ def test_large_dense_matrix():
 
     jac_pt = as_tensor(jac)
 
-    # Very large or sparse matrices use SetSubtensor to build the matri
+    # Very large or sparse matrices use SetSubtensor to build the matrix
     assert isinstance(jac_pt.owner.op, AdvancedIncSubtensor)
 
     small_eqs = sp.Matrix([x**2 for x in vars[:3]])
