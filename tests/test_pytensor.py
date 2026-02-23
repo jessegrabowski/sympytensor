@@ -15,7 +15,13 @@ import sympy as sp
 from sympy.abc import t, x, y, z
 from sympy.core.singleton import S
 
-from sympytensor.pytensor import as_tensor, dim_handling, dod_to_csr, pytensor_function, PytensorPrinter
+from sympytensor.pytensor import (
+    as_tensor,
+    dim_handling,
+    dod_to_csr,
+    pytensor_function,
+    PytensorPrinter,
+)
 
 
 xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
@@ -355,8 +361,10 @@ def test_Derivative():
     fg_actual = simp(as_tensor(sp.Derivative(sp.sin(x), x, evaluate=False)))
     fg_expected = simp(pytensor.grad(pt.sin(xt), xt))
     assert equal_computations(
-        fg_actual.outputs, fg_expected.outputs,
-        in_xs=list(fg_actual.inputs), in_ys=list(fg_expected.inputs),
+        fg_actual.outputs,
+        fg_expected.outputs,
+        in_xs=list(fg_actual.inputs),
+        in_ys=list(fg_expected.inputs),
     )
 
 
@@ -473,7 +481,7 @@ def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
 
 def test_pytensor_function_raises_on_bad_kwarg():
     """
-    Passing an unknown keyword argument to aesara_function() should raise an
+    Passing an unknown keyword argument to pytensor_function() should raise an
     exception.
     """
     with pytest.raises(TypeError, match=re.escape("function() got an unexpected keyword argument")):
@@ -555,10 +563,12 @@ def test_DenseMatrix():
         t_pt = get_pt_vars(cache, ["theta"])
         theta_val = np.pi / 4
         result = tX.eval({t_pt: theta_val})
-        expected = np.array([
-            [np.cos(theta_val), -np.sin(theta_val)],
-            [np.sin(theta_val), np.cos(theta_val)],
-        ])
+        expected = np.array(
+            [
+                [np.cos(theta_val), -np.sin(theta_val)],
+                [np.sin(theta_val), np.cos(theta_val)],
+            ]
+        )
         assert_allclose(result, expected)
 
 
@@ -594,40 +604,48 @@ def test_large_dense_matrix():
 
 def test_dense_matrix_mixed_symbolic_numeric():
     a, b = sp.symbols("a b")
-    M = sp.Matrix([
-        [1,                  a,  0],
-        [sp.Rational(1, 2), -3,  b],
-        [sp.pi,              0,  a + b],
-    ])
+    M = sp.Matrix(
+        [
+            [1, a, 0],
+            [sp.Rational(1, 2), -3, b],
+            [sp.pi, 0, a + b],
+        ]
+    )
 
     cache = {}
     M_pt = as_tensor(M, cache=cache)
     a_pt, b_pt = get_pt_vars(cache, ["a", "b"])
 
     result = M_pt.eval({a_pt: 2.0, b_pt: 5.0})
-    expected = np.array([
-        [1.0,    2.0, 0.0],
-        [0.5,   -3.0, 5.0],
-        [np.pi,  0.0, 7.0],
-    ])
+    expected = np.array(
+        [
+            [1.0, 2.0, 0.0],
+            [0.5, -3.0, 5.0],
+            [np.pi, 0.0, 7.0],
+        ]
+    )
     assert_allclose(result, expected)
 
 
 def test_dense_matrix_all_numeric_varied():
     """Test dense matrix with negative, rational, and irrational constant entries."""
-    M = sp.Matrix([
-        [-sp.Rational(7, 3), sp.sqrt(2),  0],
-        [sp.pi,              -sp.exp(1),   sp.Rational(1, 7)],
-        [100,                 0,          -sp.Rational(1, 1000)],
-    ])
+    M = sp.Matrix(
+        [
+            [-sp.Rational(7, 3), sp.sqrt(2), 0],
+            [sp.pi, -sp.exp(1), sp.Rational(1, 7)],
+            [100, 0, -sp.Rational(1, 1000)],
+        ]
+    )
     M_pt = as_tensor(M)
 
     result = M_pt.eval()
-    expected = np.array([
-        [-7 / 3,    np.sqrt(2),  0.0],
-        [np.pi,    -np.e,        1 / 7],
-        [100.0,     0.0,        -0.001],
-    ])
+    expected = np.array(
+        [
+            [-7 / 3, np.sqrt(2), 0.0],
+            [np.pi, -np.e, 1 / 7],
+            [100.0, 0.0, -0.001],
+        ]
+    )
     assert_allclose(result, expected, rtol=1e-7)
 
 
@@ -760,7 +778,9 @@ def test_Piecewise():
     expr = sp.Piecewise((0, sp.And(x > 0, x < 2)), (x, sp.Or(x > 2, x < 0)))
     result = as_tensor(expr, cache=cache)
     x_pt = get_pt_vars(cache, "x")
-    expected = pt.switch(pt.and_(x_pt > 0, x_pt < 2), 0, pt.switch(pt.or_(x_pt > 2, x_pt < 0), x_pt, np.nan))
+    expected = pt.switch(
+        pt.and_(x_pt > 0, x_pt < 2), 0, pt.switch(pt.or_(x_pt > 2, x_pt < 0), x_pt, np.nan)
+    )
     assert_graph_equal(result, expected)
 
 
@@ -993,24 +1013,24 @@ def test_MatPow_positive_integer():
     cache = {}
     result = as_tensor(A**2, cache=cache)
     A_pt = get_pt_vars(cache, "A")
-    expected = pt.dot(pt.dot(1, A_pt), A_pt)
+    expected = pt.dot(A_pt, A_pt)
     assert_graph_equal(result, expected)
 
 
 def test_MatPow_negative_exponent_raises():
     """_print_MatPow should raise NotImplementedError for negative exponents."""
     A = sp.MatrixSymbol("A", 3, 3)
-    with pytest.raises(NotImplementedError, match="non-negative integer"):
+    with pytest.raises(NotImplementedError, match="positive integer matrix powers"):
         as_tensor(sp.MatPow(A, sp.Integer(-2)), cache={})
 
 
 def test_unknown_sympy_type_raises():
-    """_print_Basic should KeyError on unmapped SymPy types."""
+    """_print_Basic should raise NotImplementedError on unmapped SymPy types."""
 
     class UnknownFunc(sp.Function):
         pass
 
-    with pytest.raises(KeyError):
+    with pytest.raises(NotImplementedError, match="has no PyTensor mapping"):
         as_tensor(UnknownFunc(x), cache={})
 
 
@@ -1116,4 +1136,3 @@ def test_sparse_matrix_with_empty_rows():
     result = S_pt.eval({a_pt: 5.0, b_pt: 7.0})
     expected = np.array([[0, 5, 0], [0, 0, 0], [7, 0, 0]], dtype="float64")
     assert_allclose(result.toarray(), expected)
-

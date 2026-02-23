@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, wraps
 from typing import Any
 
 import pytensor
@@ -6,7 +6,9 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 import sympy as sp
 from pytensor.raise_op import CheckAndRaise
+from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
 from sympy.utilities.iterables import is_sequence
 from pytensor import config
@@ -109,7 +111,7 @@ class PytensorPrinter(Printer):
         global state pass an empty dictionary. Note: the dictionary is not
         copied on initialization of the printer and will be updated in-place,
         so using the same dict object when creating multiple printers or making
-        multiple calls to :func:`.aesara_code` or :func:`.aesara_function` means
+        multiple calls to :func:`.as_tensor` or :func:`.pytensor_function` means
         the cache is shared between all these applications.
 
     Attributes
@@ -132,8 +134,7 @@ class PytensorPrinter(Printer):
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
-        """Override base _print to add fast path for numeric types.
-        """
+        """Override base _print to add fast path for numeric types."""
         if isinstance(expr, sp.Integer):
             return expr.p
 
@@ -197,10 +198,15 @@ class PytensorPrinter(Printer):
         return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
 
     def _print_Basic(self, expr, **kwargs):
-        op = mapping[type(expr)]
+        try:
+            op = mapping[type(expr)]
+        except KeyError:
+            raise NotImplementedError(
+                f"SymPy type {type(expr).__name__} has no PyTensor mapping. "
+                f"Add an entry to `mapping` or implement `_print_{type(expr).__name__}`."
+            ) from None
         children = [self._print(arg, **kwargs) for arg in expr.args]
         return op(*children)
-
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
@@ -225,16 +231,29 @@ class PytensorPrinter(Printer):
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
-    def _print_DenseMatrix_setsubtensor(self, X, **kwargs) -> pt.TensorVariable:
-        """Convert dense matrix to PyTensor using a constant base with symbolic overlays.
+    def _partition_matrix_elements(self, X, **kwargs):
+        """Partition matrix entries into a numeric base array and symbolic overlay lists.
 
-        Fills all numeric values into a numpy array upfront, then applies a single
-        set() operation for any symbolic entries. This minimizes graph nodes to O(n_symbolic)
-        instead of O(n_nonzero).
+        Parameters
+        ----------
+        X : sympy.matrices.dense.DenseMatrix
+            SymPy dense matrix.
+        **kwargs
+            Additional arguments forwarded to ``self._print`` for symbolic elements.
+
+        Returns
+        -------
+        base : np.ndarray
+            Array with numeric entries filled in, zeros elsewhere.
+        sym_rows : list[int]
+            Row indices of symbolic entries.
+        sym_cols : list[int]
+            Column indices of symbolic entries.
+        sym_values : list
+            Printed PyTensor expressions for each symbolic entry.
         """
         nrows, ncols = X.shape
         base = np.zeros((nrows, ncols), dtype=config.floatX)
-
         sym_rows = []
         sym_cols = []
         sym_values = []
@@ -248,6 +267,16 @@ class PytensorPrinter(Printer):
                 sym_cols.append(col)
                 sym_values.append(self._print(val, **kwargs))
 
+        return base, sym_rows, sym_cols, sym_values
+
+    def _print_DenseMatrix_setsubtensor(self, X, **kwargs) -> TensorVariable:
+        """Convert dense matrix to PyTensor using a constant base with symbolic overlays.
+
+        Fills all numeric values into a numpy array upfront, then applies a single
+        set() operation for any symbolic entries. This minimizes graph nodes to O(n_symbolic)
+        instead of O(n_nonzero).
+        """
+        base, sym_rows, sym_cols, sym_values = self._partition_matrix_elements(X, **kwargs)
         X_pt = pt.as_tensor_variable(base)
 
         if not sym_values:
@@ -255,7 +284,7 @@ class PytensorPrinter(Printer):
 
         return X_pt[pt.as_tensor(sym_rows), pt.as_tensor(sym_cols)].set(sym_values)
 
-    def _print_DenseMatrix(self, X, **kwargs) -> pt.TensorVariable:
+    def _print_DenseMatrix(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy dense matrix to PyTensor variable.
 
         Uses optimized conversion paths based on matrix properties:
@@ -271,7 +300,7 @@ class PytensorPrinter(Printer):
 
         Returns
         -------
-        pt.TensorVariable
+        TensorVariable
             PyTensor variable representing the matrix
         """
         try:
@@ -286,7 +315,7 @@ class PytensorPrinter(Printer):
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
-    def _print_SparseMatrix(self, X, **kwargs) -> pytensor.sparse.basic.SparseTensorVariable:
+    def _print_SparseMatrix(self, X, **kwargs) -> SparseVariable:
         """Convert SymPy sparse matrix to PyTensor CSR sparse variable.
 
         Optimizes for all-numeric case by bypassing printer dispatch.
@@ -307,16 +336,22 @@ class PytensorPrinter(Printer):
         dtype = kwargs.get("dtypes", {}).get(X)
         shape = kwargs.get("shapes", None)
         bc = kwargs.get("broadcastable", None)
-        # If shape and bc are None, it's because the IndexedBase was not indexed. The shape will either be
-        # (None, ), or the shape of the IndexedBase if it was declared.
 
         if shape is None and bc is None:
+            # No explicit shape/broadcastable provided — infer from the SymPy
+            # object.  Use its declared shape when available, otherwise assume
+            # a 1-d tensor with unknown length.
             if X.shape is not None:
-                shape = tuple([int(x) if x is not None else None for x in X.shape])
+                shape = tuple(int(x) if x is not None else None for x in X.shape)
             else:
                 shape = (None,)
+            # For IndexedBase the broadcastable signature matches the shape:
+            # concrete dimensions are non-broadcastable (int), unknown ones are
+            # None, which is exactly what _get_or_create expects.
             bc = shape
         elif shape is None:
+            # Broadcastable was provided but shape was not — mirror it so both
+            # arguments stay consistent.
             shape = bc
 
         return self._get_or_create(X, dtype=dtype, broadcastable=bc, shape=shape)
@@ -337,33 +372,59 @@ class PytensorPrinter(Printer):
 
         return base[indices]
 
-    def _print_reduction(self, X, op: str = "sum", **kwargs) -> pt.TensorVariable:
+    @staticmethod
+    def _build_reduction_slices(sum_args):
+        """Build ``{index_name: slice}`` from Sum/Product limit triples."""
+        return {var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
+
+    @staticmethod
+    def _reduction_axes(dims_pt, slice_dict):
+        """Return ``(out_idx, reduce_axis)`` for a reduction.
+
+        Parameters
+        ----------
+        dims_pt : list
+            PyTensor variables corresponding to the summand's index dimensions.
+        slice_dict : dict[str, slice]
+            Mapping from index names to slices (built by ``_build_reduction_slices``).
+        """
+        out_idx = []
+        reduce_axis = []
+        output_axis = 0
+        for idx in dims_pt:
+            val = slice_dict.get(idx.name, idx)
+            out_idx.append(val)
+            if isinstance(val, slice) and idx.name in slice_dict:
+                reduce_axis.append(output_axis)
+            if isinstance(val, slice):
+                output_axis += 1
+        return tuple(out_idx), tuple(reduce_axis) or None
+
+    def _print_reduction(self, X, op: str = "sum", **kwargs) -> TensorVariable:
         """Convert SymPy Sum/Product with indexed summands to PyTensor reduction.
 
-        Handles expressions like Sum(x[i, j, k], (i, 0, 10), (j, 0, 5)) by:
-        1. Slicing the base array along reduction dimensions
-        2. Summing/producting over the sliced dimensions
+        Handles expressions like ``Sum(x[i, j, k], (i, 0, 10), (j, 0, 5))`` by:
+
+        1. Building a slice dict from the reduction limits.
+        2. Printing the summand to obtain graph inputs.
+        3. Slicing the base array and reducing over the appropriate axes.
 
         Parameters
         ----------
         X : sympy.concrete.expr_with_limits.ExprWithLimits
-            SymPy Sum or Product expression
+            SymPy Sum or Product expression.
         op : str
-            Reduction operation: "sum" or "prod"
+            Reduction operation: ``"sum"`` or ``"prod"``.
         **kwargs
-            Additional arguments passed to element printers
+            Additional arguments passed to element printers.
 
         Returns
         -------
-        pt.TensorVariable
-            PyTensor reduction result
+        TensorVariable
+            PyTensor reduction result.
         """
         summand, *sum_args = X.args
-
-        slice_dict = {
-            var.name: pt.make_slice(int(start), int(stop) + 1)
-            for var, start, stop in sum_args
-        }
+        slice_dict = self._build_reduction_slices(sum_args)
 
         summand_pt = self._print(summand, **kwargs)
         inputs = list(pytensor.graph.graph_inputs([summand_pt]))
@@ -371,34 +432,25 @@ class PytensorPrinter(Printer):
 
         # Preserve original index order from summand (graph traversal order is arbitrary)
         dims_pt = [inputs_by_name[idx.name] for idx in summand.indices]
-        base = [x for x in inputs if x.name == summand.base.name][0]
+        base = inputs_by_name[summand.base.name]
 
-        out_idx = [slice_dict.get(idx.name, idx) for idx in dims_pt]
-
-        # Track which output axes correspond to reduction dimensions
-        reduce_axis = []
-        output_axis = 0
-        for idx, idx_val in zip(dims_pt, out_idx):
-            if isinstance(idx_val, slice):
-                if idx.name in slice_dict:
-                    reduce_axis.append(output_axis)
-                output_axis += 1
-
-        reduce_axis = tuple(reduce_axis) if reduce_axis else None
+        out_idx, reduce_axis = self._reduction_axes(dims_pt, slice_dict)
 
         match op:
             case "sum":
-                return pt.sum(base[tuple(out_idx)], axis=reduce_axis)
+                return pt.sum(base[out_idx], axis=reduce_axis)
             case "prod":
-                return pt.prod(base[tuple(out_idx)], axis=reduce_axis)
+                return pt.prod(base[out_idx], axis=reduce_axis)
             case _:
-                raise NotImplementedError(f"Unsupported reduction operation '{op}'. Supported ops: 'sum', 'prod'.")
+                raise NotImplementedError(
+                    f"Unsupported reduction operation '{op}'. Supported: 'sum', 'prod'."
+                )
 
-    def _print_Sum(self, X, **kwargs) -> pt.TensorVariable:
+    def _print_Sum(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy Sum to PyTensor sum reduction."""
         return self._print_reduction(X, op="sum", **kwargs)
 
-    def _print_Product(self, X, **kwargs) -> pt.TensorVariable:
+    def _print_Product(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy Product to PyTensor prod reduction."""
         return self._print_reduction(X, op="prod", **kwargs)
 
@@ -410,16 +462,15 @@ class PytensorPrinter(Printer):
         return result
 
     def _print_MatPow(self, expr, **kwargs):
-        children = [self._print(arg, **kwargs) for arg in expr.args]
-        result = 1
-        if isinstance(children[1], int) and children[1] > 0:
-            for i in range(children[1]):
-                result = pt.dot(result, children[0])
-        else:
+        base_pt = self._print(expr.args[0], **kwargs)
+        exp_val = self._print(expr.args[1], **kwargs)
+        if not isinstance(exp_val, int) or exp_val < 1:
             raise NotImplementedError(
-                """Only non-negative integer
-           powers of matrices can be handled by Pytensor at the moment"""
+                "Only positive integer matrix powers are supported by PyTensor."
             )
+        result = base_pt
+        for _ in range(exp_val - 1):
+            result = pt.dot(result, base_pt)
         return result
 
     def _print_MatrixSlice(self, expr, **kwargs):
@@ -443,10 +494,7 @@ class PytensorPrinter(Printer):
             ]
         )
 
-
     def _print_Piecewise(self, expr, **kwargs):
-        import numpy as np
-
         e, cond = expr.args[0].args  # First condition and corresponding value
 
         # Print conditional expression and value for first condition
@@ -461,7 +509,6 @@ class PytensorPrinter(Printer):
         # Return value_1 if condition_1 else evaluate remaining conditions
         p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
         return pt.switch(p_cond, p_e, p_remaining)
-
 
     def _print_Integer(self, expr, **kwargs):
         return expr.p
@@ -533,9 +580,7 @@ class PytensorPrinter(Printer):
 global_cache: dict[Any, Any] = {}
 
 
-def as_tensor(expr,
-              cache=None,
-              **kwargs):
+def as_tensor(expr, cache=None, **kwargs):
     """
     Convert a SymPy expression into a Pytensor graph variable.
 
@@ -611,6 +656,37 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
         return broadcastables
 
     return {}
+
+
+def _wrap_scalar_outputs(func):
+    """Wrap a compiled PyTensor function so that 0-d array outputs become Python scalars.
+
+    Parameters
+    ----------
+    func : pytensor.compile.function.types.Function
+        Compiled PyTensor function.
+
+    Returns
+    -------
+    callable
+        Wrapper that converts 0-d outputs to scalars, with a
+        ``pytensor_function`` attribute pointing to the original *func*.
+    """
+    is_0d = [o.variable.broadcastable == () for o in func.outputs]
+
+    if not any(is_0d):
+        func.pytensor_function = func
+        return func
+
+    @wraps(func)
+    def wrapper(*args):
+        out = func(*args)
+        if is_sequence(out):
+            return [o[()] if is_0d[i] else o for i, o in enumerate(out)]
+        return out[()]
+
+    wrapper.pytensor_function = func
+    return wrapper
 
 
 def pytensor_function(
@@ -734,24 +810,8 @@ def pytensor_function(
     # Compile pytensor func
     func = pytensor.function(tinputs, toutputs, **kwargs)
 
-    is_0d = [o.variable.broadcastable == () for o in func.outputs]
-
-    # No wrapper required
-    if not scalar or not any(is_0d):
+    if not scalar:
         func.pytensor_function = func
         return func
 
-    # Create wrapper to convert 0-dimensional outputs to scalars
-    def wrapper(*args):
-        out = func(*args)
-        # out can be array(1.0) or [array(1.0), array(2.0)]
-
-        if is_sequence(out):
-            return [o[()] if is_0d[i] else o for i, o in enumerate(out)]
-        else:
-            return out[()]
-
-    wrapper.__wrapped__ = func
-    wrapper.__doc__ = func.__doc__
-    wrapper.pytensor_function = func
-    return wrapper
+    return _wrap_scalar_outputs(func)
