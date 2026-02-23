@@ -69,25 +69,30 @@ mapping = {
 }
 
 
-def dod_to_csr(dod):
+def dod_to_csr(dod, shape):
     """
     Convert a dictionary of dictionaries (dod) sparse representation (used by sympy) to a
     compressed sparse row (csr) representation, used by pytensor.
+
+    Parameters
+    ----------
+    dod : dict[int, dict[int, value]]
+        Sparse data in SymPy's dictionary-of-dictionaries format.
+    shape : tuple[int, int]
+        Matrix shape ``(n_rows, n_cols)``.
     """
+    n_rows, n_cols = shape
+
     data = []
     idxs = []
     pointers = [0]
 
-    for row in sorted(dod.keys()):
-        for col in sorted(dod[row].keys()):
-            data.append(dod[row][col])
-            idxs.append(col)
+    for row in range(n_rows):
+        if row in dod:
+            for col in sorted(dod[row].keys()):
+                data.append(dod[row][col])
+                idxs.append(col)
         pointers.append(len(data))
-
-    max_row_index = max(dod.keys())
-    max_col_index = max(max(cols.keys()) for cols in dod.values())
-
-    shape = (max_row_index + 1, max_col_index + 1)
 
     return data, idxs, pointers, shape
 
@@ -287,7 +292,7 @@ class PytensorPrinter(Printer):
         Optimizes for all-numeric case by bypassing printer dispatch.
         """
         dod = X.todod()
-        data, idxs, pointers, shape = dod_to_csr(dod)
+        data, idxs, pointers, shape = dod_to_csr(dod, shape=X.shape)
 
         if all(isinstance(d, sp.Basic) and d.is_number for d in data):
             data = [float(d.evalf()) for d in data]
