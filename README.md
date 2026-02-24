@@ -354,3 +354,53 @@ Identity [id A] 'A_inv'
                 │        └─ ···
                 └─ -1 [id CB]
 ```
+
+## Explicit replacements
+
+By default, `SympyDeterministic` matches sympy symbols to PyMC variables by name. If you prefer to be explicit about
+which symbols map to which variables, pass a `replacements` dict. This is especially useful when the sympy expression
+comes from an external source, or when the symbol names don't match the model variable names:
+
+```python
+import sympy as sp
+from sympytensor import SympyDeterministic
+import pymc as pm
+
+# Suppose the expression uses greek letters
+alpha, beta, gamma, delta = sp.symbols("alpha beta gamma delta")
+A = sp.Matrix([[alpha, beta],
+               [gamma, delta]])
+A_inv = sp.matrices.Inverse(A).doit()
+
+with pm.Model() as m:
+    a = pm.Normal('a')
+    b = pm.Normal('b')
+    c = pm.Normal('c')
+    d = pm.Normal('d')
+
+    # Explicitly map sympy symbols to model variables
+    A_inv_pm = SympyDeterministic('A_inv', A_inv, replacements={
+        alpha: a,
+        beta: b,
+        gamma: c,
+        delta: d,
+    })
+```
+
+Keys can be sympy symbols or strings, and values can be PyTensor variables or strings naming model variables. You can
+also mix explicit replacements with automatic matching — any symbols not covered by `replacements` are still matched
+by name:
+
+```python
+# Expression mixes named model variables with a symbol that has a different name
+offset = sp.Symbol('offset')
+expr = alpha + offset
+
+with pm.Model() as m:
+    a = pm.Normal('a')
+    bias = pm.Normal('bias')
+
+    # 'alpha' is mapped to 'a' explicitly; 'offset' doesn't match any model variable,
+    # so we map it to 'bias' by name
+    y = SympyDeterministic('y', expr, replacements={alpha: a, "offset": bias})
+```
