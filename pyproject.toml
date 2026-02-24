@@ -5,19 +5,18 @@ build-backend = "hatchling.build"
 [project]
 name = 'sympytensor'
 dynamic = ['version']
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 description = "Print sympy expressions to pytensor graphs"
 readme = "README.md"
 license = {text = "MIT License"}
 classifiers =[
-  "Development Status :: 4 - Beta",
-  "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Topic :: Scientific/Engineering",
-  "Topic :: Scientific/Engineering :: Mathematics"
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics"
 ]
 
 keywords = [
@@ -27,9 +26,10 @@ keywords = [
 ]
 
 dependencies = [
-    "pytensor",
-    "sympy",
-    "pymc"
+    "pytensor>=2.37.0",
+    "sympy>=1.14.0",
+    "pymc>=5.27.1",
+    "mpmath>=1.1.0,<1.4.0"
   ]
 
 [project.optional-dependencies]
