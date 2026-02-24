@@ -41,9 +41,7 @@ def test_make_sympy_deterministic_raises_if_missing_inputs():
 
     with pm.Model():
         pm.Normal("x")
-        with pytest.raises(
-            ValueError, match="The following symbols were found in the provided sympy expression"
-        ):
+        with pytest.raises(ValueError, match="The following symbols were found in the provided sympy expression"):
             SympyDeterministic("y", y_sp)
 
 
