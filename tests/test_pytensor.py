@@ -399,16 +399,12 @@ def test_dim_handling():
     "kwargs, test_inputs, expected_result",
     [
         (
-            dict(
-                dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}
-            ),
+            dict(dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}),
             ([1, 2], [3, 4], [0, 0]),
             (np.asarray([4, 6])),
         ),
         (
-            dict(
-                dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"
-            ),
+            dict(dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"),
             ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
             (3 * np.arange(3)),
         ),
@@ -441,10 +437,7 @@ def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
 
     assert isinstance(f.pytensor_function, Function)
 
-    in_values = [
-        np.ones([1 if bc else 5 for bc in i.type.broadcastable])
-        for i in f.pytensor_function.input_storage
-    ]
+    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.pytensor_function.input_storage]
     out_values = f(*in_values)
     if not isinstance(out_values, list):
         out_values = [out_values]
@@ -721,9 +714,7 @@ def test_Piecewise():
     expr = sp.Piecewise((0, sp.And(x > 0, x < 2)), (x, sp.Or(x > 2, x < 0)))
     result = as_tensor(expr, cache=cache)
     x_pt = get_pt_vars(cache, "x")
-    expected = pt.switch(
-        pt.and_(x_pt > 0, x_pt < 2), 0, pt.switch(pt.or_(x_pt > 2, x_pt < 0), x_pt, np.nan)
-    )
+    expected = pt.switch(pt.and_(x_pt > 0, x_pt < 2), 0, pt.switch(pt.or_(x_pt > 2, x_pt < 0), x_pt, np.nan))
     assert_graph_equal(result, expected)
 
 
@@ -907,9 +898,7 @@ def test_print_reduce_many_d(reduce_op):
     x_pt, l_pt = get_pt_vars(cache, ["x", "l"])
     x_val = np.linspace(1, 2, 16).reshape(2, 2, 2, 2)
     expected = x_val[:2, :2, :2, 0]
-    expected = (
-        expected.sum(axis=(0, 1, 2)) if reduce_op == sp.Sum else np.prod(expected, axis=(0, 1, 2))
-    )
+    expected = expected.sum(axis=(0, 1, 2)) if reduce_op == sp.Sum else np.prod(expected, axis=(0, 1, 2))
 
     assert z.eval({x_pt: x_val, l_pt: 0}) == expected
 
