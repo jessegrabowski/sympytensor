@@ -71,17 +71,28 @@ mapping = {
 }
 
 
-def dod_to_csr(dod, shape):
-    """
-    Convert a dictionary of dictionaries (dod) sparse representation (used by sympy) to a
-    compressed sparse row (csr) representation, used by pytensor.
+def dod_to_csr(
+    dod: dict[int, dict[int, Any]], shape: tuple[int, int]
+) -> tuple[list, list[int], list[int], tuple[int, int]]:
+    """Convert a dictionary-of-dictionaries sparse representation to compressed sparse row (CSR).
 
     Parameters
     ----------
-    dod : dict[int, dict[int, value]]
+    dod : dict of int to dict of int to value
         Sparse data in SymPy's dictionary-of-dictionaries format.
-    shape : tuple[int, int]
+    shape : tuple of int
         Matrix shape ``(n_rows, n_cols)``.
+
+    Returns
+    -------
+    data : list
+        Non-zero values in row-major order.
+    indices : list of int
+        Column indices corresponding to each entry in `data`.
+    indptr : list of int
+        Row pointer array of length ``n_rows + 1``.
+    shape : tuple of int
+        The input `shape`, passed through unchanged.
     """
     n_rows, n_cols = shape
 
@@ -100,31 +111,25 @@ def dod_to_csr(dod, shape):
 
 
 class PytensorPrinter(Printer):
-    """Code printer which creates Pytensor symbolic expression graphs.
+    """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
     Parameters
     ----------
-
     cache : dict
-        Cache dictionary to use. If None (default) will use
-        the global cache. To create a printer which does not depend on or alter
-        global state pass an empty dictionary. Note: the dictionary is not
-        copied on initialization of the printer and will be updated in-place,
-        so using the same dict object when creating multiple printers or making
-        multiple calls to :func:`.as_tensor` or :func:`.pytensor_function` means
-        the cache is shared between all these applications.
+        Cache dictionary to use.  If ``None`` (default) will use the global cache.  To create a printer which does
+        not depend on or alter global state pass an empty dictionary.  Note: the dictionary is not copied on
+        initialization of the printer and will be updated in-place, so using the same dict object when creating
+        multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means the cache
+        is shared between all these applications.
 
     Attributes
     ----------
-
     cache : dict
-        A cache of Pytensor variables which have been created for SymPy
-        symbol-like objects (e.g. :class:`sympy.core.symbol.Symbol` or
-        :class:`sympy.matrices.expressions.MatrixSymbol`). This is used to
-        ensure that all references to a given symbol in an expression (or
-        multiple expressions) are printed as the same Pytensor variable, which is
-        created only once. Symbols are differentiated only by name and type. The
-        format of the cache's contents should be considered opaque to the user.
+        A cache of PyTensor variables which have been created for SymPy symbol-like objects (e.g.
+        :class:`sympy.Symbol` or :class:`sympy.MatrixSymbol`).  This is used to ensure that all references to a given symbol in
+        an expression (or multiple expressions) are printed as the same PyTensor variable, which is created only once.
+        Symbols are differentiated only by name and type.  The format of the cache's contents should be considered
+        opaque to the user.
     """
 
     printmethod = "_pytensor"
@@ -143,17 +148,25 @@ class PytensorPrinter(Printer):
 
         return super()._print(expr, **kwargs)
 
-    def _get_key(self, s, name=None, dtype=None, broadcastable=None):
+    def _get_key(
+        self,
+        s: sp.Basic,
+        name: str | None = None,
+        dtype: str | None = None,
+        broadcastable: tuple | None = None,
+    ) -> tuple:
         """Get the cache key for a SymPy object.
 
         Parameters
         ----------
-
-        s : sympy.core.basic.Basic
+        s : sympy.Basic
             SymPy object to get key for.
-
-        name : str
+        name : str, optional
             Name of object, if it does not have a ``name`` attribute.
+        dtype : str, optional
+            PyTensor dtype string.
+        broadcastable : tuple, optional
+            Broadcastable pattern.
         """
 
         if name is None:
@@ -161,11 +174,15 @@ class PytensorPrinter(Printer):
 
         return name, type(s), s.args, dtype, broadcastable
 
-    def _get_or_create(self, s, name=None, dtype=None, broadcastable=None, shape=None):
-        """
-        Get the Pytensor variable for a SymPy symbol from the cache, or create it
-        if it does not exist.
-        """
+    def _get_or_create(
+        self,
+        s: sp.Basic,
+        name: str | None = None,
+        dtype: str | None = None,
+        broadcastable: tuple | None = None,
+        shape: tuple | None = None,
+    ) -> TensorVariable:
+        """Get the PyTensor variable for a SymPy symbol from the cache, or create it if it does not exist."""
 
         # Defaults
         if name is None:
@@ -235,7 +252,7 @@ class PytensorPrinter(Printer):
 
         return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
 
-    def _partition_matrix_elements(self, X, **kwargs):
+    def _partition_matrix_elements(self, X: sp.matrices.dense.DenseMatrix, **kwargs):
         """Partition matrix entries into a numeric base array and symbolic overlay lists.
 
         Parameters
@@ -243,17 +260,17 @@ class PytensorPrinter(Printer):
         X : sympy.matrices.dense.DenseMatrix
             SymPy dense matrix.
         **kwargs
-            Additional arguments forwarded to ``self._print`` for symbolic elements.
+            Additional arguments forwarded to :meth:`_print` for symbolic elements.
 
         Returns
         -------
-        base : np.ndarray
+        base : numpy.ndarray
             Array with numeric entries filled in, zeros elsewhere.
-        sym_rows : list[int]
+        sym_rows : list of int
             Row indices of symbolic entries.
-        sym_cols : list[int]
+        sym_cols : list of int
             Column indices of symbolic entries.
-        sym_values : list
+        sym_values : list of TensorVariable
             Printed PyTensor expressions for each symbolic entry.
         """
         nrows, ncols = X.shape
@@ -273,12 +290,11 @@ class PytensorPrinter(Printer):
 
         return base, sym_rows, sym_cols, sym_values
 
-    def _print_DenseMatrix_setsubtensor(self, X, **kwargs) -> TensorVariable:
+    def _print_DenseMatrix_setsubtensor(self, X: sp.matrices.dense.DenseMatrix, **kwargs) -> TensorVariable:
         """Convert dense matrix to PyTensor using a constant base with symbolic overlays.
 
-        Fills all numeric values into a numpy array upfront, then applies a single
-        set() operation for any symbolic entries. This minimizes graph nodes to O(n_symbolic)
-        instead of O(n_nonzero).
+        Fills all numeric values into a numpy array upfront, then applies a single ``set()`` operation for any
+        symbolic entries.  This minimizes graph nodes to *O(n_symbolic)* instead of *O(n_nonzero)*.
         """
         base, sym_rows, sym_cols, sym_values = self._partition_matrix_elements(X, **kwargs)
         X_pt = pt.as_tensor_variable(base)
@@ -288,24 +304,20 @@ class PytensorPrinter(Printer):
 
         return X_pt[pt.as_tensor(sym_rows), pt.as_tensor(sym_cols)].set(sym_values)
 
-    def _print_DenseMatrix(self, X, **kwargs) -> TensorVariable:
-        """Convert SymPy dense matrix to PyTensor variable.
-
-        Uses optimized conversion paths based on matrix properties:
-        - All-numeric: Direct numpy array conversion (fastest, no graph ops)
-        - Mixed symbolic/numeric: Constant base with symbolic overlays via setsubtensor
+    def _print_DenseMatrix(self, X: sp.matrices.dense.DenseMatrix, **kwargs) -> TensorVariable:
+        """Convert a SymPy dense matrix to a PyTensor variable.
 
         Parameters
         ----------
         X : sympy.matrices.dense.DenseMatrix
-            SymPy dense matrix to convert
+            SymPy dense matrix to convert.
         **kwargs
-            Additional arguments passed to element printers (dtypes, broadcastables, etc.)
+            Additional arguments passed to element printers (e.g. `dtypes`, `broadcastables`).
 
         Returns
         -------
-        TensorVariable
-            PyTensor variable representing the matrix
+        result : TensorVariable
+            PyTensor variable representing the matrix.
         """
         try:
             elements = list(X.flat())
@@ -319,10 +331,10 @@ class PytensorPrinter(Printer):
 
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
-    def _print_SparseMatrix(self, X, **kwargs) -> SparseVariable:
-        """Convert SymPy sparse matrix to PyTensor CSR sparse variable.
+    def _print_SparseMatrix(self, X: sp.SparseMatrix, **kwargs) -> SparseVariable:
+        """Convert a SymPy sparse matrix to a PyTensor CSR sparse variable.
 
-        Optimizes for all-numeric case by bypassing printer dispatch.
+        Optimizes for the all-numeric case by bypassing printer dispatch.
         """
         dod = X.todod()
         data, idxs, pointers, shape = dod_to_csr(dod, shape=X.shape)
@@ -382,15 +394,15 @@ class PytensorPrinter(Printer):
         return {var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
 
     @staticmethod
-    def _reduction_axes(dims_pt, slice_dict):
+    def _reduction_axes(dims_pt: list[TensorVariable], slice_dict: dict[str, slice]) -> tuple[tuple, tuple | None]:
         """Return ``(out_idx, reduce_axis)`` for a reduction.
 
         Parameters
         ----------
-        dims_pt : list
+        dims_pt : list of TensorVariable
             PyTensor variables corresponding to the summand's index dimensions.
-        slice_dict : dict[str, slice]
-            Mapping from index names to slices (built by ``_build_reduction_slices``).
+        slice_dict : dict of str to slice
+            Mapping from index names to slices (built by :meth:`_build_reduction_slices`).
         """
         out_idx = []
         reduce_axis = []
@@ -424,7 +436,7 @@ class PytensorPrinter(Printer):
 
         Returns
         -------
-        TensorVariable
+        result : TensorVariable
             PyTensor reduction result.
         """
         summand, *sum_args = X.args
@@ -446,9 +458,7 @@ class PytensorPrinter(Printer):
             case "prod":
                 return pt.prod(base[out_idx], axis=reduce_axis)
             case _:
-                raise NotImplementedError(
-                    f"Unsupported reduction operation '{op}'. Supported: 'sum', 'prod'."
-                )
+                raise NotImplementedError(f"Unsupported reduction operation '{op}'. Supported: 'sum', 'prod'.")
 
     def _print_Sum(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy Sum to PyTensor sum reduction."""
@@ -469,9 +479,7 @@ class PytensorPrinter(Printer):
         base_pt = self._print(expr.args[0], **kwargs)
         exp_val = self._print(expr.args[1], **kwargs)
         if not isinstance(exp_val, int) or exp_val < 1:
-            raise NotImplementedError(
-                "Only positive integer matrix powers are supported by PyTensor."
-            )
+            raise NotImplementedError("Only positive integer matrix powers are supported by PyTensor.")
         result = base_pt
         for _ in range(exp_val - 1):
             result = pt.dot(result, base_pt)
@@ -485,17 +493,12 @@ class PytensorPrinter(Printer):
 
     def _print_BlockMatrix(self, expr, **kwargs):
         nrows, ncols = expr.blocks.shape
-        blocks = [
-            [self._print(expr.blocks[r, c], **kwargs) for c in range(ncols)] for r in range(nrows)
-        ]
+        blocks = [[self._print(expr.blocks[r, c], **kwargs) for c in range(ncols)] for r in range(nrows)]
         return pt.join(0, *[pt.join(1, *row) for row in blocks])
 
     def _print_slice(self, expr, **kwargs):
         return slice(
-            *[
-                self._print(i, **kwargs) if isinstance(i, sp.Basic) else i
-                for i in (expr.start, expr.stop, expr.step)
-            ]
+            *[self._print(i, **kwargs) if isinstance(i, sp.Basic) else i for i in (expr.start, expr.stop, expr.step)]
         )
 
     def _print_Piecewise(self, expr, **kwargs):
@@ -532,46 +535,35 @@ class PytensorPrinter(Printer):
     def emptyPrinter(self, expr):
         return expr
 
-    def doprint(self, expr, dtypes=None, broadcastables=None):
-        """Convert a SymPy expression to a Pytensor graph variable.
+    def doprint(
+        self,
+        expr: sp.Expr,
+        dtypes: dict[sp.Symbol, str] | None = None,
+        broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
+    ) -> TensorVariable:
+        """Convert a SymPy expression to a PyTensor graph variable.
 
-        The ``dtypes`` and ``broadcastable`` arguments are used to specify the
-        data type, dimension, and broadcasting behavior of the Pytensor variables
-        corresponding to the free symbols in ``expr``. Each is a mapping from
-        SymPy symbols to the value of the corresponding argument to
-        ``pytensor.tensor.var.TensorVariable``.
+        The `dtypes` and `broadcastables` arguments specify the data type, dimension, and broadcasting behavior of the
+        PyTensor variables corresponding to the free symbols in `expr`.  Each is a mapping from SymPy symbols to the
+        value of the corresponding argument to :class:`pytensor.tensor.variable.TensorVariable`.
 
-        See the corresponding `documentation page`__ for more information on
-        broadcasting in Pytensor.
-
+        See the `PyTensor broadcasting docs`__ for more information.
 
         .. __: https://pytensor.readthedocs.io/en/latest/reference/tensor/broadcastable.html#broadcasting
 
         Parameters
         ----------
-
-        expr : sympy.core.expr.Expr
+        expr : sympy.Expr
             SymPy expression to print.
-
-        dtypes : dict
-            Mapping from SymPy symbols to Pytensor datatypes to use when creating
-            new Pytensor variables for those symbols. Corresponds to the ``dtype``
-            argument to ``pytensor.tensor.var.TensorVariable``. Defaults to ``'floatX'``
-            for symbols not included in the mapping.
-
-        broadcastable : dict
-            Mapping from SymPy symbols to the value of the ``broadcastable``
-            argument to ``pytensor.tensor.var.TensorVariable`` to use when creating Pytensor
-            variables for those symbols. Defaults to the empty tuple for symbols
-            not included in the mapping (resulting in a scalar).
+        dtypes : dict of sympy.Symbol to str, optional
+            Mapping from SymPy symbols to PyTensor dtype strings.  Defaults to ``'floatX'`` for symbols not included.
+        broadcastables : dict of sympy.Symbol to tuple of bool, optional
+            Mapping from SymPy symbols to broadcastable tuples.  Defaults to ``()`` (scalar) for symbols not included.
 
         Returns
         -------
-
-        pytensor.graph.basic.Variable
-            A variable corresponding to the expression's value in a Pytensor
-            symbolic expression graph.
-
+        result : TensorVariable
+            A variable corresponding to the expression's value in a PyTensor symbolic expression graph.
         """
         if dtypes is None:
             dtypes = {}
@@ -584,33 +576,26 @@ class PytensorPrinter(Printer):
 global_cache: dict[Any, Any] = {}
 
 
-def as_tensor(expr, cache=None, **kwargs):
-    """
-    Convert a SymPy expression into a Pytensor graph variable.
+def as_tensor(
+    expr: sp.Expr,
+    cache: dict[Any, Any] | None = None,
+    **kwargs,
+) -> TensorVariable:
+    """Convert a SymPy expression into a PyTensor graph variable.
 
     Parameters
     ----------
-
-    expr : sympy.core.expr.Expr
+    expr : sympy.Expr
         SymPy expression object to convert.
-
-    cache : dict
-        Cached Pytensor variables (see :class:`PytensorPrinter.cache
-        <PytensorPrinter>`). Defaults to the module-level global cache.
-
-    dtypes : dict
-        Passed to :meth:`.PytensorPrinter.doprint`.
-
-    broadcastables : dict
-        Passed to :meth:`.PytensorPrinter.doprint`.
+    cache : dict, optional
+        Cached PyTensor variables (see :attr:`PytensorPrinter.cache`).  Defaults to the module-level global cache.
+    **kwargs
+        Forwarded to :meth:`PytensorPrinter.doprint` (e.g. `dtypes`, `broadcastables`).
 
     Returns
     -------
-
-    pytensor.graph.basic.Variable
-        A variable corresponding to the expression's value in a Pytensor symbolic
-        expression graph.
-
+    result : TensorVariable
+        A variable corresponding to the expression's value in a PyTensor symbolic expression graph.
     """
     if cache is None:
         cache = global_cache
@@ -618,36 +603,31 @@ def as_tensor(expr, cache=None, **kwargs):
     return PytensorPrinter(cache=cache, settings={}).doprint(expr, **kwargs)
 
 
-def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
-    r"""
-    Get value of ``broadcastables`` argument to :func:`.pytensor_code` from
-    keyword arguments to :func:`.pytensor_function`.
+def dim_handling(
+    inputs: list[sp.Symbol],
+    dim: int | None = None,
+    dims: dict[sp.Symbol, int] | None = None,
+    broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
+) -> dict[sp.Symbol, tuple[bool, ...]]:
+    r"""Compute `broadcastables` argument to :meth:`PytensorPrinter.doprint` from convenience keyword arguments.
 
     Included for backwards compatibility.
 
     Parameters
     ----------
-
-    inputs
+    inputs : list of sympy.Symbol
         Sequence of input symbols.
-
-    dim : int
-        Common number of dimensions for all inputs. Overrides other arguments
-        if given.
-
-    dims : dict
-        Mapping from input symbols to number of dimensions. Overrides
-        ``broadcastables`` argument if given.
-
-    broadcastables : dict
-        Explicit value of ``broadcastables`` argument to
-        :meth:`.PytensorPrinter.doprint`. If not None function will return this value unchanged.
+    dim : int, optional
+        Common number of dimensions for all inputs.  Overrides other arguments if given.
+    dims : dict of sympy.Symbol to int, optional
+        Mapping from input symbols to number of dimensions.  Overrides `broadcastables` if given.
+    broadcastables : dict of sympy.Symbol to tuple of bool, optional
+        Explicit broadcastable values.  Returned unchanged if not ``None``.
 
     Returns
     -------
-    dict
-        Dictionary mapping elements of ``inputs`` to their "broadcastables"
-        values (tuple of ``bool``\ s).
+    result : dict of sympy.Symbol to tuple of bool
+        Dictionary mapping elements of `inputs` to their broadcastable tuples.
     """
     if dim is not None:
         return {s: (False,) * dim for s in inputs}
@@ -662,7 +642,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
     return {}
 
 
-def _wrap_scalar_outputs(func):
+def _wrap_scalar_outputs(func: pytensor.compile.function.types.Function) -> callable:
     """Wrap a compiled PyTensor function so that 0-d array outputs become Python scalars.
 
     Parameters
@@ -672,9 +652,8 @@ def _wrap_scalar_outputs(func):
 
     Returns
     -------
-    callable
-        Wrapper that converts 0-d outputs to scalars, with a
-        ``pytensor_function`` attribute pointing to the original *func*.
+    wrapped : callable
+        Wrapper that converts 0-d outputs to scalars, with a ``pytensor_function`` attribute pointing to `func`.
     """
     is_0d = [o.variable.broadcastable == () for o in func.outputs]
 
@@ -694,94 +673,87 @@ def _wrap_scalar_outputs(func):
 
 
 def pytensor_function(
-    inputs, outputs, scalar=False, *, dim=None, dims=None, broadcastables=None, **kwargs
-):
-    """
-    Create a Pytensor function from SymPy expressions.
+    inputs: list[sp.Symbol],
+    outputs: list[sp.Expr],
+    scalar: bool = False,
+    *,
+    dim: int | None = None,
+    dims: dict[sp.Symbol, int] | None = None,
+    broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
+    **kwargs,
+) -> callable:
+    """Create a compiled PyTensor function from SymPy expressions.
 
-    The inputs and outputs are converted to Pytensor variables using
-    :func:`.pytensor_code` and then passed to ``pytensor.function``.
+    The inputs and outputs are converted to PyTensor variables using :func:`as_tensor` and then passed to
+    :func:`pytensor.function`.
 
     Parameters
     ----------
-
-    inputs
+    inputs : list of sympy.Symbol
         Sequence of symbols which constitute the inputs of the function.
-
-    outputs
-        Sequence of expressions which constitute the outputs(s) of the
-        function. The free symbols of each expression must be a subset of
-        ``inputs``.
-
-    scalar : bool
-        Convert 0-dimensional arrays in output to scalars. This will return a
-        Python wrapper function around the Pytensor function object.
-
-    cache : dict
-        Cached Pytensor variables (see :class:`PytensorPrinter.cache
-        <PytensorPrinter>`). Defaults to the module-level global cache.
-
-    dtypes : dict
-        Passed to :meth:`.PytensorPrinter.doprint`.
-
-    broadcastables : dict
-        Passed to :meth:`.PytensorPrinter.doprint`.
-
-    dims : dict
-        Alternative to ``broadcastables`` argument. Mapping from elements of
-        ``inputs`` to integers indicating the dimension of their associated
-        arrays/tensors. Overrides ``broadcastables`` argument if given.
-
-    dim : int
-        Another alternative to the ``broadcastables`` argument. Common number of
-        dimensions to use for all arrays/tensors.
-        ``pytensor_function([x, y], [...], dim=2)`` is equivalent to using
+    outputs : list of sympy.Expr
+        Sequence of expressions which constitute the output(s) of the function.  The free symbols of each expression
+        must be a subset of `inputs`.
+    scalar : bool, optional
+        Convert 0-dimensional arrays in output to scalars.  This will return a Python wrapper function around the
+        PyTensor function object.
+    cache : dict, optional
+        Cached PyTensor variables (see :attr:`PytensorPrinter.cache`).  Defaults to the module-level global cache.
+    dtypes : dict, optional
+        Passed to :meth:`PytensorPrinter.doprint`.
+    broadcastables : dict of sympy.Symbol to tuple of bool, optional
+        Passed to :meth:`PytensorPrinter.doprint`.
+    dims : dict of sympy.Symbol to int, optional
+        Alternative to `broadcastables`.  Mapping from elements of `inputs` to integers indicating the dimension of
+        their associated arrays/tensors.  Overrides `broadcastables` if given.
+    dim : int, optional
+        Another alternative to `broadcastables`.  Common number of dimensions to use for all arrays/tensors.
+        ``pytensor_function([x, y], [...], dim=2)`` is equivalent to
         ``broadcastables={x: (False, False), y: (False, False)}``.
+    **kwargs
+        Additional keyword arguments forwarded to :func:`pytensor.function`.
 
     Returns
     -------
-    callable
-        A callable object which takes values of ``inputs`` as positional
-        arguments and returns an output array for each of the expressions
-        in ``outputs``. If ``outputs`` is a single expression the function will
-        return a Numpy array, if it is a list of multiple expressions the
-        function will return a list of arrays. See description of the ``squeeze``
-        argument above for the behavior when a single output is passed in a list.
-        The returned object will either be an instance of
-        ``pytensor.compile.function.types.Function`` or a Python wrapper
-        function around one. In both cases, the returned value will have a
-        ``pytensor_function`` attribute which points to the return value of
-        ``pytensor.function``.
+    f : callable
+        A callable object which takes values of `inputs` as positional arguments and returns an output array for each
+        expression in `outputs`.  If `outputs` is a single expression the function returns a NumPy array; if it is a
+        list of multiple expressions the function returns a list of arrays.  The returned object will either be an
+        instance of :class:`pytensor.compile.function.types.Function` or a Python wrapper function around one.  In both
+        cases, the returned value has a ``pytensor_function`` attribute pointing to the underlying compiled
+        :func:`pytensor.function` result.
+
+    See Also
+    --------
+    dim_handling
 
     Examples
     --------
+    .. testcode:: python
 
-    >>> from sympy.abc import x, y, z
-    >>> from sympytensor.pytensor import pytensor_function
+        from sympy.abc import x, y, z
+        from sympytensor.pytensor import pytensor_function
 
     A simple function with one input and one output:
 
-    >>> f1 = pytensor_function([x], [x**2 - 1], scalar=True)
-    >>> f1(3)
-    8.0
+    .. testcode:: python
+
+        f1 = pytensor_function([x], [x**2 - 1], scalar=True)
+        assert f1(3) == 8.0
 
     A function with multiple inputs and one output:
 
-    >>> f2 = pytensor_function([x, y, z], [(x**z + y**z)**(1/z)], scalar=True)
-    >>> f2(3, 4, 2)
-    5.0
+    .. testcode:: python
+
+        f2 = pytensor_function([x, y, z], [(x**z + y**z)**(1/z)], scalar=True)
+        assert f2(3, 4, 2) == 5.0
 
     A function with multiple inputs and multiple outputs:
 
-    >>> f3 = pytensor_function([x, y], [x**2 + y**2, x**2 - y**2], scalar=True)
-    >>> f3(2, 3)
-    [13.0, -5.0]
+    .. testcode:: python
 
-    See also
-    --------
-
-    dim_handling
-
+        f3 = pytensor_function([x, y], [x**2 + y**2, x**2 - y**2], scalar=True)
+        assert f3(2, 3) == [13.0, -5.0]
     """
 
     # Pop off non-pytensor keyword args
@@ -802,9 +774,7 @@ def pytensor_function(
 
     # fix constant expressions as variables
     toutputs = [
-        output
-        if isinstance(output, pytensor.graph.basic.Variable)
-        else pt.as_tensor_variable(output)
+        output if isinstance(output, pytensor.graph.basic.Variable) else pt.as_tensor_variable(output)
         for output in toutputs
     ]
 
