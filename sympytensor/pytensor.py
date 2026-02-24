@@ -121,15 +121,6 @@ class PytensorPrinter(Printer):
         initialization of the printer and will be updated in-place, so using the same dict object when creating
         multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means the cache
         is shared between all these applications.
-
-    Attributes
-    ----------
-    cache : dict
-        A cache of PyTensor variables which have been created for SymPy symbol-like objects (e.g.
-        :class:`sympy.Symbol` or :class:`sympy.MatrixSymbol`).  This is used to ensure that all references to a given symbol in
-        an expression (or multiple expressions) are printed as the same PyTensor variable, which is created only once.
-        Symbols are differentiated only by name and type.  The format of the cache's contents should be considered
-        opaque to the user.
     """
 
     printmethod = "_pytensor"
