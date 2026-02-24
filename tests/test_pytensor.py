@@ -1056,3 +1056,12 @@ def test_sparse_matrix_with_empty_rows():
     result = S_pt.eval({a_pt: 5.0, b_pt: 7.0})
     expected = np.array([[0, 5, 0], [0, 0, 0], [7, 0, 0]], dtype="float64")
     assert_allclose(result.toarray(), expected)
+
+
+def test_zero_matrix():
+    Z = sp.ZeroMatrix(3, 4)
+    cache = {}
+    Z_pt = as_tensor(Z, cache=cache)
+    assert Z_pt.type.ndim == 2
+    assert Z_pt.type.shape == (3, 4)
+    assert_allclose(Z_pt.eval(), np.zeros((3, 4)))

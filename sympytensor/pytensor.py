@@ -212,6 +212,10 @@ class PytensorPrinter(Printer):
         dtype = kwargs.get("dtypes", {}).get(X)
         return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
 
+    def _print_ZeroMatrix(self, expr, **kwargs):
+        rows, cols = expr.shape
+        return pt.zeros((int(rows), int(cols)), dtype=pytensor.config.floatX)
+
     def _print_Idx(self, i, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(i)
         if dtype is None:
