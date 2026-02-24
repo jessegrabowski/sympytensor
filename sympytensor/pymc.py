@@ -23,11 +23,6 @@ def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     -------
     sub_dict : dict of TensorVariable to TensorVariable
         Mapping from the cached printer variables to the corresponding model random variables.
-
-    Raises
-    ------
-    ValueError
-        If any symbol name in `cache` does not correspond to a variable in `model`.
     """
     pymc_model = pm.modelcontext(model)
     found_params = []
@@ -52,13 +47,98 @@ def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     return sub_dict
 
 
+def _cache_name_lookup(cache: dict) -> dict[str, TensorVariable]:
+    """Build a name to cached PyTensor variable lookup from a printer cache."""
+    return {info[0]: pt_var for info, pt_var in cache.items()}
+
+
+def _resolve_sympy_key(expr_key: str | sp.Expr) -> str:
+    """Extract the symbol name from a replacement key."""
+    if isinstance(expr_key, str):
+        return expr_key
+    if isinstance(expr_key, sp.Expr) and hasattr(expr_key, "name"):
+        return expr_key.name
+    raise TypeError(f"Replacement keys must be named sympy expressions or strings, got {type(expr_key)}")
+
+
+def _resolve_model_value(model_value: str | TensorVariable, model: pm.Model) -> TensorVariable:
+    """Resolve a replacement value to a concrete :class:`~pytensor.tensor.TensorVariable`."""
+    if isinstance(model_value, TensorVariable):
+        return model_value
+    if isinstance(model_value, str):
+        result = getattr(model, model_value, None)
+        if result is None:
+            raise AttributeError(
+                f"Variable '{model_value}' not found in the PyMC model. "
+                f"Available variables: {[v.name for v in model.value_vars]}"
+            )
+        return result
+    raise TypeError(f"Replacement values must be TensorVariables or strings, got {type(model_value)}")
+
+
+def _resolve_replacements(
+    replacements: dict[str | sp.Expr, str | TensorVariable],
+    cache: dict,
+    model: pm.Model,
+) -> dict[TensorVariable, TensorVariable]:
+    """Resolve user-supplied replacements into a PyTensor substitution dict.
+
+    Each key in `replacements` identifies a SymPy symbol (by reference or by name) that was
+    printed into the PyTensor graph, and each value identifies the :class:`~pytensor.tensor.TensorVariable`
+    (or a model variable looked up by name) that should replace it.
+
+    Parameters
+    ----------
+    replacements : dict
+        User-supplied mapping.  Keys may be :class:`sympy.Symbol` instances or ``str`` names
+        corresponding to symbols in `cache`.  Values may be :class:`~pytensor.tensor.TensorVariable`
+        instances or ``str`` names corresponding to variables in `model`.
+    cache : dict
+        Printer cache produced by :class:`~sympytensor.pytensor.PytensorPrinter`.
+    model : :class:`pymc.Model`
+        PyMC model used to look up variables when the value side is a string.
+
+    Returns
+    -------
+    sub_dict : dict of TensorVariable to TensorVariable
+    """
+    name_to_cache = _cache_name_lookup(cache)
+
+    sub_dict: dict[TensorVariable, TensorVariable] = {}
+    for expr_key, model_value in replacements.items():
+        symbol_name = _resolve_sympy_key(expr_key)
+
+        if symbol_name not in name_to_cache:
+            raise KeyError(
+                f"Symbol '{symbol_name}' not found in the printed expression cache. "
+                f"Available symbols: {list(name_to_cache)}"
+            )
+
+        sub_dict[name_to_cache[symbol_name]] = _resolve_model_value(model_value, model)
+
+    return sub_dict
+
+
+def _exclude_replaced_from_cache(cache: dict, replaced_vars: set[TensorVariable]) -> dict:
+    """Return a copy of `cache` without entries whose variables were explicitly replaced."""
+    return {k: v for k, v in cache.items() if v not in replaced_vars}
+
+
 def SympyDeterministic(
-    name: str, expr: sp.Expr | list[sp.Expr], model: pm.Model | None = None, dims=None
+    name: str,
+    expr: sp.Expr | list[sp.Expr],
+    model: pm.Model | None = None,
+    dims=None,
+    replacements: dict[str | sp.Expr, str | TensorVariable] | None = None,
 ) -> TensorVariable:
     """Create a :class:`pymc.Deterministic` variable from a SymPy expression.
 
     The expression is converted to a PyTensor graph via :func:`~sympytensor.pytensor.as_tensor`, and any SymPy symbols
     whose names match random variables in the active :class:`pymc.Model` are automatically substituted.
+
+    An optional `replacements` mapping can be provided to explicitly bind SymPy symbols to model
+    variables (or arbitrary :class:`~pytensor.tensor.TensorVariable` objects), overriding name-based matching.
+    Symbols not covered by `replacements` are still auto-matched by name.
 
     Parameters
     ----------
@@ -70,6 +150,9 @@ def SympyDeterministic(
         PyMC model to add the variable to.  Defaults to the current model context.
     dims : str or tuple of str, optional
         Dimension names, forwarded to :class:`pymc.Deterministic`.
+    replacements : dict, optional
+        Explicit mapping from SymPy symbols (or their string names) to PyTensor variables (or
+        string names of model variables).  These take priority over automatic name matching.
 
     Returns
     -------
@@ -84,10 +167,18 @@ def SympyDeterministic(
     else:
         pytensor_expr = as_tensor(expr, cache=cache)
 
-    # This catches corner cases where the input is a constant variable
     pytensor_expr = pytensor.tensor.as_tensor_variable(pytensor_expr)
 
-    replace_dict = _match_cache_to_rvs(cache, model)
+    if replacements is not None:
+        explicit_dict = _resolve_replacements(replacements, cache, model)
+        remaining_cache = _exclude_replaced_from_cache(cache, set(explicit_dict.keys()))
+    else:
+        explicit_dict = {}
+        remaining_cache = cache
+
+    auto_dict = _match_cache_to_rvs(remaining_cache, model) if remaining_cache else {}
+    replace_dict = {**auto_dict, **explicit_dict}
+
     pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)
     expr_pm = pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)
 
