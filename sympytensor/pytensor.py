@@ -103,7 +103,7 @@ class PytensorPrinter(Printer):
     """Code printer which creates Pytensor symbolic expression graphs.
 
     Parameters
-    ==========
+    ----------
 
     cache : dict
         Cache dictionary to use. If None (default) will use
@@ -115,7 +115,7 @@ class PytensorPrinter(Printer):
         the cache is shared between all these applications.
 
     Attributes
-    ==========
+    ----------
 
     cache : dict
         A cache of Pytensor variables which have been created for SymPy
@@ -147,7 +147,7 @@ class PytensorPrinter(Printer):
         """Get the cache key for a SymPy object.
 
         Parameters
-        ==========
+        ----------
 
         s : sympy.core.basic.Basic
             SymPy object to get key for.
@@ -548,7 +548,7 @@ class PytensorPrinter(Printer):
         .. __: https://pytensor.readthedocs.io/en/latest/reference/tensor/broadcastable.html#broadcasting
 
         Parameters
-        ==========
+        ----------
 
         expr : sympy.core.expr.Expr
             SymPy expression to print.
@@ -566,7 +566,7 @@ class PytensorPrinter(Printer):
             not included in the mapping (resulting in a scalar).
 
         Returns
-        =======
+        -------
 
         pytensor.graph.basic.Variable
             A variable corresponding to the expression's value in a Pytensor
@@ -589,7 +589,7 @@ def as_tensor(expr, cache=None, **kwargs):
     Convert a SymPy expression into a Pytensor graph variable.
 
     Parameters
-    ==========
+    ----------
 
     expr : sympy.core.expr.Expr
         SymPy expression object to convert.
@@ -605,7 +605,7 @@ def as_tensor(expr, cache=None, **kwargs):
         Passed to :meth:`.PytensorPrinter.doprint`.
 
     Returns
-    =======
+    -------
 
     pytensor.graph.basic.Variable
         A variable corresponding to the expression's value in a Pytensor symbolic
@@ -626,7 +626,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
     Included for backwards compatibility.
 
     Parameters
-    ==========
+    ----------
 
     inputs
         Sequence of input symbols.
@@ -644,7 +644,7 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
         :meth:`.PytensorPrinter.doprint`. If not None function will return this value unchanged.
 
     Returns
-    =======
+    -------
     dict
         Dictionary mapping elements of ``inputs`` to their "broadcastables"
         values (tuple of ``bool``\ s).
@@ -703,7 +703,7 @@ def pytensor_function(
     :func:`.pytensor_code` and then passed to ``pytensor.function``.
 
     Parameters
-    ==========
+    ----------
 
     inputs
         Sequence of symbols which constitute the inputs of the function.
@@ -739,7 +739,7 @@ def pytensor_function(
         ``broadcastables={x: (False, False), y: (False, False)}``.
 
     Returns
-    =======
+    -------
     callable
         A callable object which takes values of ``inputs`` as positional
         arguments and returns an output array for each of the expressions
@@ -754,7 +754,7 @@ def pytensor_function(
         ``pytensor.function``.
 
     Examples
-    ========
+    --------
 
     >>> from sympy.abc import x, y, z
     >>> from sympytensor.pytensor import pytensor_function
@@ -778,7 +778,7 @@ def pytensor_function(
     [13.0, -5.0]
 
     See also
-    ========
+    --------
 
     dim_handling
 
