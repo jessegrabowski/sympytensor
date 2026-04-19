@@ -38,6 +38,8 @@ jobs:
     - name: Install current branch
       run: |
         pip install -e .
+        pip install --no-deps --force-reinstall "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3"
+        pip install --no-deps --force-reinstall "pymc @ git+https://github.com/pymc-devs/pymc.git@v6"
         python --version
 
     - name: Run tests

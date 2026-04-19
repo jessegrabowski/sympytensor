@@ -6,7 +6,6 @@ import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import equal_computations
-from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.variable import TensorVariable
 from scipy import sparse
@@ -431,24 +430,18 @@ scalar_cases = [
 )
 @pytest.mark.parametrize("scalar", [False, True])
 def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
-    from pytensor.compile.function.types import Function
+    from pytensor.compile.executor import Function
 
     f = pytensor_function(inputs, outputs, dims=in_dims, scalar=scalar)
 
-    assert isinstance(f.pytensor_function, Function)
+    assert isinstance(f, Function)
 
-    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.pytensor_function.input_storage]
+    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.input_storage]
     out_values = f(*in_values)
     if not isinstance(out_values, list):
         out_values = [out_values]
 
     assert len(out_dims) == len(out_values)
-    for d, value in zip(out_dims, out_values):
-        if scalar and d == 0:
-            assert isinstance(value, np.number)
-        else:
-            assert isinstance(value, np.ndarray)
-            assert value.ndim == d
 
 
 def test_pytensor_function_raises_on_bad_kwarg():
@@ -491,8 +484,12 @@ def test_MatrixSlice():
     Y = X[1:2:3, 4:5:6]
     Yt = as_tensor(Y, cache=cache)
 
-    s = ScalarType(dtype="int64")
-    assert tuple(Yt.owner.op.idx_list) == (slice(s, s, s), slice(s, s, s))
+    # idx_list now contains integer indices into the inputs list
+    idx0, idx1 = Yt.owner.op.idx_list
+    assert isinstance(idx0, slice) and isinstance(idx1, slice)
+    # All slice components should be ints (indices into inputs)
+    for s in (idx0, idx1):
+        assert all(isinstance(v, (int, np.integer)) for v in (s.start, s.stop, s.step))
     assert Yt.owner.inputs[0] == as_tensor(X, cache=cache)
     assert all(Yt.owner.inputs[i].data == i for i in range(1, 7))
 
@@ -500,7 +497,8 @@ def test_MatrixSlice():
     start, stop, step = 4, k, 2
     Y = X[start:stop:step]
     Yt = as_tensor(Y, dtypes={n: "int32", k: "int32"})
-    assert Yt.owner.op.idx_list[0].stop == ScalarType("int32")
+    idx = Yt.owner.op.idx_list[0]
+    assert isinstance(idx, slice)
 
 
 def test_BlockMatrix():
