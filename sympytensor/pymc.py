@@ -1,8 +1,8 @@
 import pymc as pm
-import pytensor
 import sympy as sp
 from pytensor.tensor import TensorVariable
-
+from pytensor.graph.replace import graph_replace
+import pytensor.tensor as pt
 from sympytensor.pytensor import as_tensor
 
 
@@ -163,11 +163,11 @@ def SympyDeterministic(
     cache = {}
 
     if isinstance(expr, list):
-        pytensor_expr = pytensor.tensor.stack([as_tensor(e, cache=cache) for e in expr])
+        pytensor_expr = pt.stack([as_tensor(e, cache=cache) for e in expr])
     else:
         pytensor_expr = as_tensor(expr, cache=cache)
 
-    pytensor_expr = pytensor.tensor.as_tensor_variable(pytensor_expr)
+    pytensor_expr = pt.as_tensor_variable(pytensor_expr)
 
     if replacements is not None:
         explicit_dict = _resolve_replacements(replacements, cache, model)
@@ -179,7 +179,7 @@ def SympyDeterministic(
     auto_dict = _match_cache_to_rvs(remaining_cache, model) if remaining_cache else {}
     replace_dict = {**auto_dict, **explicit_dict}
 
-    pymc_expr = pytensor.graph_replace(pytensor_expr, replace_dict, strict=True)
+    pymc_expr = graph_replace(pytensor_expr, replace_dict, strict=True)
     expr_pm = pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)
 
     return expr_pm

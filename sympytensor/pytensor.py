@@ -1,4 +1,4 @@
-from functools import partial, wraps
+from functools import partial
 from typing import Any
 
 import pytensor
@@ -10,7 +10,6 @@ from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
-from sympy.utilities.iterables import is_sequence
 from pytensor import config
 import numpy as np
 
@@ -382,7 +381,7 @@ class PytensorPrinter(Printer):
     @staticmethod
     def _build_reduction_slices(sum_args):
         """Build ``{index_name: slice}`` from Sum/Product limit triples."""
-        return {var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
+        return {var.name: slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
 
     @staticmethod
     def _reduction_axes(dims_pt: list[TensorVariable], slice_dict: dict[str, slice]) -> tuple[tuple, tuple | None]:
@@ -633,36 +632,6 @@ def dim_handling(
     return {}
 
 
-def _wrap_scalar_outputs(func: pytensor.compile.function.types.Function) -> callable:
-    """Wrap a compiled PyTensor function so that 0-d array outputs become Python scalars.
-
-    Parameters
-    ----------
-    func : pytensor.compile.function.types.Function
-        Compiled PyTensor function.
-
-    Returns
-    -------
-    wrapped : callable
-        Wrapper that converts 0-d outputs to scalars, with a ``pytensor_function`` attribute pointing to `func`.
-    """
-    is_0d = [o.variable.broadcastable == () for o in func.outputs]
-
-    if not any(is_0d):
-        func.pytensor_function = func
-        return func
-
-    @wraps(func)
-    def wrapper(*args):
-        out = func(*args)
-        if is_sequence(out):
-            return [o[()] if is_0d[i] else o for i, o in enumerate(out)]
-        return out[()]
-
-    wrapper.pytensor_function = func
-    return wrapper
-
-
 def pytensor_function(
     inputs: list[sp.Symbol],
     outputs: list[sp.Expr],
@@ -773,10 +742,4 @@ def pytensor_function(
         toutputs = toutputs[0]
 
     # Compile pytensor func
-    func = pytensor.function(tinputs, toutputs, **kwargs)
-
-    if not scalar:
-        func.pytensor_function = func
-        return func
-
-    return _wrap_scalar_outputs(func)
+    return pytensor.function(tinputs, toutputs, **kwargs)
