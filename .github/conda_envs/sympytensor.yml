@@ -4,8 +4,7 @@ channels:
 dependencies:
   # Base dependencies
   - sympy
-  - pytensor
-  - pymc
+  - arviz>1.0
 
   # Testing dependencies
   - pre-commit
