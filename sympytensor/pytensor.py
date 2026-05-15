@@ -217,7 +217,8 @@ class PytensorPrinter(Printer):
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
-        return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
+        shape = tuple(int(d) if d.is_Integer else None for d in X.shape)
+        return self._get_or_create(X, dtype=dtype, broadcastable=shape, shape=shape)
 
     def _print_ZeroMatrix(self, expr, **kwargs):
         rows, cols = expr.shape
