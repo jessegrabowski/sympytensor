@@ -522,7 +522,8 @@ def test_DenseMatrix():
         cache = {}
         tX = as_tensor(X, cache=cache)
         assert isinstance(tX, TensorVariable)
-        assert isinstance(tX.owner.op, AdvancedIncSubtensor)
+        # All entries symbolic: the scatter-over-zero-base path is bypassed.
+        assert not isinstance(tX.owner.op, AdvancedIncSubtensor)
 
         t_pt = get_pt_vars(cache, ["theta"])
         theta_val = np.pi / 4

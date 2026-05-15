@@ -294,6 +294,10 @@ class PytensorPrinter(Printer):
         symbolic entries.  This minimizes graph nodes to *O(n_symbolic)* instead of *O(n_nonzero)*.
         """
         base, sym_rows, sym_cols, sym_values = self._partition_matrix_elements(X, **kwargs)
+
+        if len(sym_values) == X.rows * X.cols:
+            return pt.stack(sym_values).reshape(X.shape)
+
         X_pt = pt.as_tensor_variable(base)
 
         if not sym_values:
