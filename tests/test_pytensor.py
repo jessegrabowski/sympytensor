@@ -133,6 +133,21 @@ def test_MatrixSymbol():
     XX = as_tensor(X)
     assert isinstance(XX, TensorVariable)
     assert XX.type.broadcastable == (False, False)
+    assert XX.type.shape == (4, 4)
+
+
+def test_MatrixSymbol_symbolic_shape():
+    n = sp.Symbol("n", integer=True, positive=True)
+    A = sp.MatrixSymbol("A_sym", n, 5)
+    AA = as_tensor(A)
+    assert AA.type.shape == (None, 5)
+
+
+def test_MatrixSymbol_column_vector():
+    v = sp.MatrixSymbol("v_col", 7, 1)
+    vv = as_tensor(v)
+    assert vv.type.shape == (7, 1)
+    assert vv.type.broadcastable == (False, True)
 
 
 def test_AppliedUndef():
@@ -436,7 +451,7 @@ def test_printing_scalar_function(inputs, outputs, in_dims, out_dims):
 
     assert isinstance(f, Function)
 
-    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.input_storage]
+    in_values = [np.ones(tuple(d if d is not None else 5 for d in i.type.shape)) for i in f.input_storage]
     out_values = f(*in_values)
     if not isinstance(out_values, list):
         out_values = [out_values]
