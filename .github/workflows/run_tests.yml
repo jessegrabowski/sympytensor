@@ -30,7 +30,7 @@ jobs:
         environment-file: .github/conda_envs/sympytensor.yml
         create-args: >-
           python=${{matrix.python-version}}
-        micromamba-version: "latest"
+        micromamba-version: "2.6.0-0"
         environment-name: sympytensor-test
         init-shell: bash
         cache-environment: true
