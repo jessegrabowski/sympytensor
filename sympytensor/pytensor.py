@@ -223,6 +223,9 @@ class PytensorPrinter(Printer):
         rows, cols = expr.shape
         return pt.zeros((int(rows), int(cols)), dtype=pytensor.config.floatX)
 
+    def _print_Identity(self, expr, **kwargs):
+        return pt.eye(int(expr.shape[0]), dtype=pytensor.config.floatX)
+
     def _print_Idx(self, i, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(i)
         if dtype is None:
@@ -473,12 +476,9 @@ class PytensorPrinter(Printer):
     def _print_MatPow(self, expr, **kwargs):
         base_pt = self._print(expr.args[0], **kwargs)
         exp_val = self._print(expr.args[1], **kwargs)
-        if not isinstance(exp_val, int) or exp_val < 1:
-            raise NotImplementedError("Only positive integer matrix powers are supported by PyTensor.")
-        result = base_pt
-        for _ in range(exp_val - 1):
-            result = pt.dot(result, base_pt)
-        return result
+        if not isinstance(exp_val, int):
+            raise NotImplementedError("Matrix power exponent must be an integer.")
+        return pt.linalg.matrix_power(base_pt, exp_val)
 
     def _print_MatrixSlice(self, expr, **kwargs):
         parent = self._print(expr.parent, **kwargs)

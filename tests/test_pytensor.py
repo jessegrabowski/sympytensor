@@ -934,12 +934,16 @@ def test_sparse_matrix():
 
 def test_MatPow_positive_integer():
     A = sp.MatrixSymbol("A", 3, 3)
-    cache = {}
-    result = as_tensor(A**2, cache=cache)
-    A_pt = get_pt_vars(cache, "A")
-    expected = pt.dot(A_pt, A_pt)
-    assert_graph_equal(result, expected)
+    f = pytensor_function([A], [A**3], dims={A: 2})
+    A_val = np.random.default_rng(0).standard_normal((3, 3))
+    assert_allclose(f(A_val), A_val @ A_val @ A_val)
 
+
+def test_MatPow_zero_returns_identity():
+    A = sp.MatrixSymbol("A", 3, 3)
+    f = pytensor_function([A], [A**0], dims={A: 2}, on_unused_input="ignore")
+    A_val = np.random.default_rng(0).standard_normal((3, 3))
+    assert_allclose(f(A_val), np.eye(3))
 
 def test_Inverse():
     A = sp.MatrixSymbol("A", 3, 3)
@@ -959,8 +963,16 @@ def test_Inverse_times_vector():
 
 def test_MatPow_negative_exponent_raises():
     A = sp.MatrixSymbol("A", 3, 3)
-    with pytest.raises(NotImplementedError, match="positive integer matrix powers"):
-        as_tensor(sp.MatPow(A, sp.Integer(-2)), cache={})
+    f = pytensor_function([A], [A**8], dims={A: 2})
+    dot_nodes = [n for n in f.maker.fgraph.toposort() if "dot" in type(n.op).__name__.lower()]
+    assert len(dot_nodes) <= 4
+
+
+def test_MatPow_non_integer_exponent_raises():
+    A = sp.MatrixSymbol("A", 3, 3)
+    n = sp.Symbol("n")
+    with pytest.raises(NotImplementedError, match="must be an integer"):
+        as_tensor(sp.MatPow(A, n), cache={})
 
 
 def test_unknown_sympy_type_raises():
