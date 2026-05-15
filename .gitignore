@@ -9,6 +9,7 @@
 __pycache__/
 dist/
 sympytensor.egg-info/
+sympytensor/_version.py
 
 # User-specific stuff
 .idea/**/workspace.xml
