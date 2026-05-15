@@ -465,6 +465,11 @@ class PytensorPrinter(Printer):
             result = pt.dot(result, child)
         return result
 
+    def _print_Inverse(self, expr, **kwargs):
+        # sp.Inverse subclasses sp.MatPow, so without this override the MRO would
+        # route to _print_MatPow and raise on the implicit -1 exponent.
+        return pt.linalg.inv(self._print(expr.arg, **kwargs))
+
     def _print_MatPow(self, expr, **kwargs):
         base_pt = self._print(expr.args[0], **kwargs)
         exp_val = self._print(expr.args[1], **kwargs)
