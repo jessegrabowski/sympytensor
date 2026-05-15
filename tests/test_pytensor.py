@@ -838,7 +838,7 @@ def test_sliced_indexbase_2d():
     assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0
 
 
-@pytest.mark.parametrize("i_range", [(0, 10), (5, 7)])
+@pytest.mark.parametrize("i_range", [(0, 9), (5, 7)])
 @pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
 def test_print_reduce_1d(i_range: tuple, reduce_op):
     cache = {}
@@ -859,7 +859,7 @@ def test_print_reduce_1d(i_range: tuple, reduce_op):
     assert z.eval({x_pt: x_val}) == expected
 
 
-@pytest.mark.parametrize("i_range", [(0, 10), (5, 7)])
+@pytest.mark.parametrize("i_range", [(0, 9), (5, 7)])
 @pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
 def test_print_reduce_2d(i_range: tuple, reduce_op):
     cache = {}
@@ -896,33 +896,55 @@ def test_print_reduce_many_d(reduce_op):
     expected = x_val[:2, :2, :2, 0]
     expected = expected.sum(axis=(0, 1, 2)) if reduce_op == sp.Sum else np.prod(expected, axis=(0, 1, 2))
 
-    assert z.eval({x_pt: x_val, l_pt: 0}) == expected
+    assert np.isclose(z.eval({x_pt: x_val, l_pt: 0}), expected)
 
 
-@pytest.mark.parametrize(
-    "summand_factory",
-    [
-        lambda xb, yb, i: sp.Symbol("a") * xb[i],
-        lambda xb, yb, i: xb[i] + yb[i],
-        lambda xb, yb, i: xb[i] ** 2,
-    ],
-    ids=["Mul", "Add", "Pow"],
-)
-def test_sum_rejects_nested_summand(summand_factory):
+def test_sum_with_mul_summand():
+    cache = {}
     i = sp.Idx("i")
-    xb = sp.IndexedBase("x")
-    yb = sp.IndexedBase("y")
-    expr = sp.Sum(summand_factory(xb, yb, i), (i, 0, 5))
-    with pytest.raises(NotImplementedError, match="Sum/Product summand must be a bare sympy.Indexed"):
-        as_tensor(expr, cache={})
+    x = sp.IndexedBase("x")[i]
+    a = sp.Symbol("a")
+    z = as_tensor(sp.Sum(a * x, (i, 0, 5)), cache=cache)
+
+    x_pt, a_pt = get_pt_vars(cache, ["x", "a"])
+    x_val = np.arange(1.0, 7.0)
+    assert np.isclose(z.eval({x_pt: x_val, a_pt: 2.0}), 2.0 * x_val.sum())
 
 
-def test_product_rejects_nested_summand():
+def test_sum_with_add_summand():
+    cache = {}
     i = sp.Idx("i")
-    xb = sp.IndexedBase("x")
-    expr = sp.Product(sp.Symbol("a") * xb[i], (i, 0, 5))
-    with pytest.raises(NotImplementedError, match="Sum/Product summand must be a bare sympy.Indexed"):
-        as_tensor(expr, cache={})
+    x = sp.IndexedBase("x")[i]
+    y = sp.IndexedBase("y")[i]
+    z = as_tensor(sp.Sum(x + y, (i, 0, 5)), cache=cache)
+
+    x_pt, y_pt = get_pt_vars(cache, ["x", "y"])
+    x_val = np.arange(1.0, 7.0)
+    y_val = np.arange(7.0, 13.0)
+    assert np.isclose(z.eval({x_pt: x_val, y_pt: y_val}), (x_val + y_val).sum())
+
+
+def test_sum_with_pow_summand():
+    cache = {}
+    i = sp.Idx("i")
+    x = sp.IndexedBase("x")[i]
+    z = as_tensor(sp.Sum(x**2, (i, 0, 5)), cache=cache)
+
+    x_pt = get_pt_vars(cache, ["x"])
+    x_val = np.arange(1.0, 7.0)
+    assert np.isclose(z.eval({x_pt: x_val}), (x_val**2).sum())
+
+
+def test_product_with_mul_summand():
+    cache = {}
+    i = sp.Idx("i")
+    x = sp.IndexedBase("x")[i]
+    a = sp.Symbol("a")
+    z = as_tensor(sp.Product(a * x, (i, 0, 5)), cache=cache)
+
+    x_pt, a_pt = get_pt_vars(cache, ["x", "a"])
+    x_val = np.arange(1.0, 7.0)
+    assert np.isclose(z.eval({x_pt: x_val, a_pt: 2.0}), (2.0**6) * x_val.prod())
 
 
 def sparse_allclose(A, B, atol=1e-8):
