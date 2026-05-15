@@ -1,10 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytensor
 import sympy as sp
 from pytensor.graph.replace import graph_replace
 from pytensor.tensor import TensorVariable
 
 from sympytensor.pytensor import as_tensor
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pymc.model import Model
