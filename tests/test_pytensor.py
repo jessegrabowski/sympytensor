@@ -237,7 +237,7 @@ def test_Trace():
     cache = {}
     result = as_tensor(sp.Trace(A), cache=cache)
     A_pt = get_pt_vars(cache, "A")
-    assert_graph_equal(result, pt.linalg.trace(A_pt))
+    assert_graph_equal(result, pt.trace(A_pt))
 
 
 def test_Determinant():

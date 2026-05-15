@@ -2,12 +2,10 @@ from functools import partial
 from typing import Any
 
 import pytensor
-import pytensor.scalar as ps
 import pytensor.tensor as pt
 import sympy as sp
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse.variable import SparseVariable
-from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
 from pytensor import config
@@ -61,9 +59,9 @@ mapping = {
     sp.Min: pt.minimum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.conjugate: pt.conj,
     # Matrices
-    sp.MatAdd: Elemwise(ps.add),
-    sp.HadamardProduct: Elemwise(ps.mul),
-    sp.Trace: pt.linalg.trace,
+    sp.MatAdd: pt.add,
+    sp.HadamardProduct: pt.mul,
+    sp.Trace: pt.trace,
     sp.Determinant: pt.linalg.det,
     sp.Inverse: pt.linalg.inv,
     sp.Transpose: pt.matrix_transpose,
