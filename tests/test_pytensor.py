@@ -941,6 +941,22 @@ def test_MatPow_positive_integer():
     assert_graph_equal(result, expected)
 
 
+def test_Inverse():
+    A = sp.MatrixSymbol("A", 3, 3)
+    f = pytensor_function([A], [A.inv()])
+    A_val = np.array([[4.0, 1.0, 0.0], [1.0, 3.0, 1.0], [0.0, 1.0, 2.0]])
+    assert np.allclose(f(A_val), np.linalg.inv(A_val))
+
+
+def test_Inverse_times_vector():
+    A = sp.MatrixSymbol("A", 3, 3)
+    b = sp.MatrixSymbol("b", 3, 1)
+    f = pytensor_function([A, b], [A.inv() * b])
+    A_val = np.array([[4.0, 1.0, 0.0], [1.0, 3.0, 1.0], [0.0, 1.0, 2.0]])
+    b_val = np.array([[1.0], [2.0], [3.0]])
+    assert np.allclose(f(A_val, b_val), np.linalg.solve(A_val, b_val))
+
+
 def test_MatPow_negative_exponent_raises():
     A = sp.MatrixSymbol("A", 3, 3)
     with pytest.raises(NotImplementedError, match="positive integer matrix powers"):
