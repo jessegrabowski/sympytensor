@@ -431,7 +431,7 @@ scalar_cases = [
 )
 @pytest.mark.parametrize("scalar", [False, True])
 def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
-    from pytensor.compile.function.types import Function
+    from pytensor.compile import Function
 
     f = pytensor_function(inputs, outputs, dims=in_dims, scalar=scalar)
 
@@ -491,8 +491,7 @@ def test_MatrixSlice():
     Y = X[1:2:3, 4:5:6]
     Yt = as_tensor(Y, cache=cache)
 
-    s = ScalarType(dtype="int64")
-    assert tuple(Yt.owner.op.idx_list) == (slice(s, s, s), slice(s, s, s))
+    assert tuple(Yt.owner.op.idx_list) == (slice(0, 1, 2), slice(3, 4, 5))
     assert Yt.owner.inputs[0] == as_tensor(X, cache=cache)
     assert all(Yt.owner.inputs[i].data == i for i in range(1, 7))
 
@@ -500,7 +499,8 @@ def test_MatrixSlice():
     start, stop, step = 4, k, 2
     Y = X[start:stop:step]
     Yt = as_tensor(Y, dtypes={n: "int32", k: "int32"})
-    assert Yt.owner.op.idx_list[0].stop == ScalarType("int32")
+    stop_pos = Yt.owner.op.idx_list[0].stop
+    assert Yt.owner.inputs[1 + stop_pos].type == ScalarType("int32")
 
 
 def test_BlockMatrix():

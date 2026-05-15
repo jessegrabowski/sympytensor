@@ -382,7 +382,7 @@ class PytensorPrinter(Printer):
     @staticmethod
     def _build_reduction_slices(sum_args):
         """Build ``{index_name: slice}`` from Sum/Product limit triples."""
-        return {var.name: pt.make_slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
+        return {var.name: slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
 
     @staticmethod
     def _reduction_axes(dims_pt: list[TensorVariable], slice_dict: dict[str, slice]) -> tuple[tuple, tuple | None]:
