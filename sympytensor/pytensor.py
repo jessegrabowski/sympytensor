@@ -224,6 +224,10 @@ class PytensorPrinter(Printer):
         return pt.zeros((int(rows), int(cols)), dtype=pytensor.config.floatX)
 
     def _print_Idx(self, i, **kwargs):
+        sum_idx_arrays = kwargs.get("_sum_idx_arrays")
+        if sum_idx_arrays is not None and i.name in sum_idx_arrays:
+            return sum_idx_arrays[i.name]
+
         dtype = kwargs.get("dtypes", {}).get(i)
         if dtype is None:
             dtype = "int32"
@@ -373,54 +377,29 @@ class PytensorPrinter(Printer):
         bc = kwargs.get("broadcastables", {}).get(X.base, None)
         if bc is None:
             bc = shape
-        indices = tuple([self._print(x) for x in X.indices])
+        indices = tuple([self._print(x, **kwargs) for x in X.indices])
         base = self._print(X.base, shape=shape, broadcastable=bc, **kwargs)
 
         return base[indices]
 
-    @staticmethod
-    def _build_reduction_slices(sum_args):
-        """Build ``{index_name: slice}`` from Sum/Product limit triples."""
-        return {var.name: slice(int(start), int(stop) + 1) for var, start, stop in sum_args}
-
-    @staticmethod
-    def _reduction_axes(dims_pt: list[TensorVariable], slice_dict: dict[str, slice]) -> tuple[tuple, tuple | None]:
-        """Return ``(out_idx, reduce_axis)`` for a reduction.
-
-        Parameters
-        ----------
-        dims_pt : list of TensorVariable
-            PyTensor variables corresponding to the summand's index dimensions.
-        slice_dict : dict of str to slice
-            Mapping from index names to slices (built by :meth:`_build_reduction_slices`).
-        """
-        out_idx = []
-        reduce_axis = []
-        output_axis = 0
-        for idx in dims_pt:
-            val = slice_dict.get(idx.name, idx)
-            out_idx.append(val)
-            if isinstance(val, slice) and idx.name in slice_dict:
-                reduce_axis.append(output_axis)
-            if isinstance(val, slice):
-                output_axis += 1
-        return tuple(out_idx), tuple(reduce_axis) or None
-
     def _print_reduction(self, X, op: str = "sum", **kwargs) -> TensorVariable:
-        """Convert SymPy Sum/Product with indexed summands to PyTensor reduction.
+        """Convert a SymPy Sum or Product to a PyTensor reduction.
 
-        Handles expressions like ``Sum(x[i, j, k], (i, 0, 10), (j, 0, 5))`` by:
-
-        1. Building a slice dict from the reduction limits.
-        2. Printing the summand to obtain graph inputs.
-        3. Slicing the base array and reducing over the appropriate axes.
+        Each summation index is replaced by a :func:`pytensor.tensor.arange` over its
+        declared range, broadcast to a unique leading axis so multiple summation
+        indices occupy distinct dimensions regardless of the order they appear in the
+        summand.  The summand is then printed via the normal dispatch — elementwise
+        operations broadcast naturally — and the leading axes are reduced via
+        :func:`pt.sum` or :func:`pt.prod`.  Summation indices that do not appear in
+        the summand contribute a multiplicative factor (Sum) or power (Product) equal
+        to their range size.
 
         Parameters
         ----------
         X : sympy.concrete.expr_with_limits.ExprWithLimits
             SymPy Sum or Product expression.
-        op : str
-            Reduction operation: ``"sum"`` or ``"prod"``.
+        op : {"sum", "prod"}
+            Reduction operation.
         **kwargs
             Additional arguments passed to element printers.
 
@@ -429,31 +408,42 @@ class PytensorPrinter(Printer):
         result : TensorVariable
             PyTensor reduction result.
         """
+        if op not in ("sum", "prod"):
+            raise NotImplementedError(f"Unsupported reduction operation '{op}'. Supported: 'sum', 'prod'.")
+
         summand, *sum_args = X.args
-        if not isinstance(summand, sp.Indexed):
-            raise NotImplementedError(
-                f"Sum/Product summand must be a bare sympy.Indexed; got {type(summand).__name__}. "
-                "Nested expressions like Sum(a*x[i], ...) are not yet supported."
-            )
-        slice_dict = self._build_reduction_slices(sum_args)
+        sum_specs = {var.name: (int(start), int(stop)) for var, start, stop in sum_args}
+        sum_index_names = [var.name for var, _, _ in sum_args]
 
-        summand_pt = self._print(summand, **kwargs)
-        inputs = list(pytensor.graph.graph_inputs([summand_pt]))
-        inputs_by_name = {inp.name: inp for inp in inputs}
+        used = {sym.name for sym in summand.free_symbols if isinstance(sym, sp.Idx) and sym.name in sum_specs}
+        used_in_order = [name for name in sum_index_names if name in used]
+        n_used = len(used_in_order)
 
-        # Preserve original index order from summand (graph traversal order is arbitrary)
-        dims_pt = [inputs_by_name[idx.name] for idx in summand.indices]
-        base = inputs_by_name[summand.base.name]
+        sum_idx_arrays = {}
+        for axis, name in enumerate(used_in_order):
+            start, stop = sum_specs[name]
+            rng = pt.arange(start, stop + 1, dtype="int64")
+            if n_used > 1:
+                pattern = ["x"] * n_used
+                pattern[axis] = 0
+                rng = rng.dimshuffle(*pattern)
+            sum_idx_arrays[name] = rng
 
-        out_idx, reduce_axis = self._reduction_axes(dims_pt, slice_dict)
+        kwargs_with_arrays = {**kwargs, "_sum_idx_arrays": sum_idx_arrays}
+        result = self._print(summand, **kwargs_with_arrays)
 
-        match op:
-            case "sum":
-                return pt.sum(base[out_idx], axis=reduce_axis)
-            case "prod":
-                return pt.prod(base[out_idx], axis=reduce_axis)
-            case _:
-                raise NotImplementedError(f"Unsupported reduction operation '{op}'. Supported: 'sum', 'prod'.")
+        if n_used:
+            reducer = pt.sum if op == "sum" else pt.prod
+            result = reducer(result, axis=tuple(range(n_used)))
+
+        for name in sum_index_names:
+            if name in used:
+                continue
+            start, stop = sum_specs[name]
+            size = stop - start + 1
+            result = result * size if op == "sum" else result**size
+
+        return result
 
     def _print_Sum(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy Sum to PyTensor sum reduction."""
