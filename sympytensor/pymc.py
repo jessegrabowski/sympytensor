@@ -1,10 +1,18 @@
-import pymc as pm
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytensor
 import sympy as sp
 from pytensor.graph.replace import graph_replace
 from pytensor.tensor import TensorVariable
 
 from sympytensor.pytensor import as_tensor
+
+if TYPE_CHECKING:
+    from pymc.model import Model
+
+pm = None
 
 
 def _match_cache_to_rvs(cache: dict, model=None) -> dict:
@@ -25,6 +33,10 @@ def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     sub_dict : dict of TensorVariable to TensorVariable
         Mapping from the cached printer variables to the corresponding model random variables.
     """
+    global pm
+    if pm is None:
+        import pymc as pm
+
     pymc_model = pm.modelcontext(model)
     found_params = []
     var_names = [info[0] for info in cache.keys()]
@@ -62,7 +74,7 @@ def _resolve_sympy_key(expr_key: str | sp.Expr) -> str:
     raise TypeError(f"Replacement keys must be named sympy expressions or strings, got {type(expr_key)}")
 
 
-def _resolve_model_value(model_value: str | TensorVariable, model: pm.Model) -> TensorVariable:
+def _resolve_model_value(model_value: str | TensorVariable, model: Model) -> TensorVariable:
     """Resolve a replacement value to a concrete :class:`~pytensor.tensor.TensorVariable`."""
     if isinstance(model_value, TensorVariable):
         return model_value
@@ -80,7 +92,7 @@ def _resolve_model_value(model_value: str | TensorVariable, model: pm.Model) -> 
 def _resolve_replacements(
     replacements: dict[str | sp.Expr, str | TensorVariable],
     cache: dict,
-    model: pm.Model,
+    model: Model,
 ) -> dict[TensorVariable, TensorVariable]:
     """Resolve user-supplied replacements into a PyTensor substitution dict.
 
@@ -128,7 +140,7 @@ def _exclude_replaced_from_cache(cache: dict, replaced_vars: set[TensorVariable]
 def SympyDeterministic(
     name: str,
     expr: sp.Expr | list[sp.Expr],
-    model: pm.Model | None = None,
+    model: Model | None = None,
     dims=None,
     replacements: dict[str | sp.Expr, str | TensorVariable] | None = None,
 ) -> TensorVariable:
@@ -160,6 +172,10 @@ def SympyDeterministic(
     expr_pm : TensorVariable
         The new deterministic variable registered in the model.
     """
+    global pm
+    if pm is None:
+        import pymc as pm
+
     model = pm.modelcontext(model)
     cache = {}
 
