@@ -376,12 +376,12 @@ def test_pytensor_function_matches_numpy():
     assert np.linalg.norm(f(xx, yy) - 3 * np.arange(3)) < 1e-9
 
 
-@pytest.mark.parametrize("n_out, scalar", [(1, True), (1, False), (2, False)])
-def test_pytensor_matrix_function_matches_numpy(n_out, scalar):
+@pytest.mark.parametrize("n_out", [1, 2])
+def test_pytensor_matrix_function_matches_numpy(n_out):
     m = sp.Matrix([[x, y], [z, x + y + z]])
     expected = np.array([[1.0, 2.0], [3.0, 1.0 + 2.0 + 3.0]])
 
-    f = pytensor_function([x, y, z], [m] * n_out, scalar=scalar)
+    f = pytensor_function([x, y, z], [m] * n_out)
     output = f(1.0, 2.0, 3.0)
     if n_out == 1:
         output = np.expand_dims(output, 0)
@@ -429,26 +429,22 @@ scalar_cases = [
     scalar_cases,
     ids=["single 0d", "single 2d", "single 1d", "two 0d", "mixed"],
 )
-@pytest.mark.parametrize("scalar", [False, True])
-def test_printing_scalar_function(inputs, outputs, in_dims, out_dims, scalar):
+def test_printing_scalar_function(inputs, outputs, in_dims, out_dims):
     from pytensor.compile import Function
 
-    f = pytensor_function(inputs, outputs, dims=in_dims, scalar=scalar)
+    f = pytensor_function(inputs, outputs, dims=in_dims)
 
-    assert isinstance(f.pytensor_function, Function)
+    assert isinstance(f, Function)
 
-    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.pytensor_function.input_storage]
+    in_values = [np.ones([1 if bc else 5 for bc in i.type.broadcastable]) for i in f.input_storage]
     out_values = f(*in_values)
     if not isinstance(out_values, list):
         out_values = [out_values]
 
     assert len(out_dims) == len(out_values)
     for d, value in zip(out_dims, out_values):
-        if scalar and d == 0:
-            assert isinstance(value, np.number)
-        else:
-            assert isinstance(value, np.ndarray)
-            assert value.ndim == d
+        assert isinstance(value, np.ndarray)
+        assert value.ndim == d
 
 
 def test_pytensor_function_raises_on_bad_kwarg():

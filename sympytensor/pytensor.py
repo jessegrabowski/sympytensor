@@ -1,4 +1,4 @@
-from functools import partial, wraps
+from functools import partial
 from typing import Any
 
 import pytensor
@@ -10,7 +10,6 @@ from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
-from sympy.utilities.iterables import is_sequence
 from pytensor import config
 import numpy as np
 
@@ -633,46 +632,15 @@ def dim_handling(
     return {}
 
 
-def _wrap_scalar_outputs(func: pytensor.compile.function.types.Function) -> callable:
-    """Wrap a compiled PyTensor function so that 0-d array outputs become Python scalars.
-
-    Parameters
-    ----------
-    func : pytensor.compile.function.types.Function
-        Compiled PyTensor function.
-
-    Returns
-    -------
-    wrapped : callable
-        Wrapper that converts 0-d outputs to scalars, with a ``pytensor_function`` attribute pointing to `func`.
-    """
-    is_0d = [o.variable.broadcastable == () for o in func.outputs]
-
-    if not any(is_0d):
-        func.pytensor_function = func
-        return func
-
-    @wraps(func)
-    def wrapper(*args):
-        out = func(*args)
-        if is_sequence(out):
-            return [o[()] if is_0d[i] else o for i, o in enumerate(out)]
-        return out[()]
-
-    wrapper.pytensor_function = func
-    return wrapper
-
-
 def pytensor_function(
     inputs: list[sp.Symbol],
     outputs: list[sp.Expr],
-    scalar: bool = False,
     *,
     dim: int | None = None,
     dims: dict[sp.Symbol, int] | None = None,
     broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
     **kwargs,
-) -> callable:
+) -> "pytensor.compile.executor.Function":
     """Create a compiled PyTensor function from SymPy expressions.
 
     The inputs and outputs are converted to PyTensor variables using :func:`as_tensor` and then passed to
@@ -685,9 +653,6 @@ def pytensor_function(
     outputs : list of sympy.Expr
         Sequence of expressions which constitute the output(s) of the function.  The free symbols of each expression
         must be a subset of `inputs`.
-    scalar : bool, optional
-        Convert 0-dimensional arrays in output to scalars.  This will return a Python wrapper function around the
-        PyTensor function object.
     cache : dict, optional
         Cached PyTensor variables (see :attr:`PytensorPrinter.cache`).  Defaults to the module-level global cache.
     dtypes : dict, optional
@@ -706,48 +671,14 @@ def pytensor_function(
 
     Returns
     -------
-    f : callable
-        A callable object which takes values of `inputs` as positional arguments and returns an output array for each
-        expression in `outputs`.  If `outputs` is a single expression the function returns a NumPy array; if it is a
-        list of multiple expressions the function returns a list of arrays.  The returned object will either be an
-        instance of :class:`pytensor.compile.function.types.Function` or a Python wrapper function around one.  In both
-        cases, the returned value has a ``pytensor_function`` attribute pointing to the underlying compiled
-        :func:`pytensor.function` result.
+    f : pytensor.compile.Function
+        Compiled PyTensor function taking values of `inputs` as positional arguments.
 
     See Also
     --------
     dim_handling
-
-    Examples
-    --------
-    .. testcode:: python
-
-        from sympy.abc import x, y, z
-        from sympytensor.pytensor import pytensor_function
-
-    A simple function with one input and one output:
-
-    .. testcode:: python
-
-        f1 = pytensor_function([x], [x**2 - 1], scalar=True)
-        assert f1(3) == 8.0
-
-    A function with multiple inputs and one output:
-
-    .. testcode:: python
-
-        f2 = pytensor_function([x, y, z], [(x**z + y**z)**(1/z)], scalar=True)
-        assert f2(3, 4, 2) == 5.0
-
-    A function with multiple inputs and multiple outputs:
-
-    .. testcode:: python
-
-        f3 = pytensor_function([x, y], [x**2 + y**2, x**2 - y**2], scalar=True)
-        assert f3(2, 3) == [13.0, -5.0]
     """
 
-    # Pop off non-pytensor keyword args
     cache = kwargs.pop("cache", {})
     dtypes = kwargs.pop("dtypes", {})
 
@@ -758,12 +689,10 @@ def pytensor_function(
         broadcastables=broadcastables,
     )
 
-    # Print inputs/outputs
     code = partial(as_tensor, cache=cache, dtypes=dtypes, broadcastables=broadcastables)
     tinputs = list(map(code, inputs))
     toutputs = list(map(code, outputs))
 
-    # fix constant expressions as variables
     toutputs = [
         output if isinstance(output, pytensor.graph.basic.Variable) else pt.as_tensor_variable(output)
         for output in toutputs
@@ -772,11 +701,4 @@ def pytensor_function(
     if len(toutputs) == 1:
         toutputs = toutputs[0]
 
-    # Compile pytensor func
-    func = pytensor.function(tinputs, toutputs, **kwargs)
-
-    if not scalar:
-        func.pytensor_function = func
-        return func
-
-    return _wrap_scalar_outputs(func)
+    return pytensor.function(tinputs, toutputs, **kwargs)
