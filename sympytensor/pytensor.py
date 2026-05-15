@@ -430,6 +430,11 @@ class PytensorPrinter(Printer):
             PyTensor reduction result.
         """
         summand, *sum_args = X.args
+        if not isinstance(summand, sp.Indexed):
+            raise NotImplementedError(
+                f"Sum/Product summand must be a bare sympy.Indexed; got {type(summand).__name__}. "
+                "Nested expressions like Sum(a*x[i], ...) are not yet supported."
+            )
         slice_dict = self._build_reduction_slices(sum_args)
 
         summand_pt = self._print(summand, **kwargs)

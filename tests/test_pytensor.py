@@ -899,6 +899,32 @@ def test_print_reduce_many_d(reduce_op):
     assert z.eval({x_pt: x_val, l_pt: 0}) == expected
 
 
+@pytest.mark.parametrize(
+    "summand_factory",
+    [
+        lambda xb, yb, i: sp.Symbol("a") * xb[i],
+        lambda xb, yb, i: xb[i] + yb[i],
+        lambda xb, yb, i: xb[i] ** 2,
+    ],
+    ids=["Mul", "Add", "Pow"],
+)
+def test_sum_rejects_nested_summand(summand_factory):
+    i = sp.Idx("i")
+    xb = sp.IndexedBase("x")
+    yb = sp.IndexedBase("y")
+    expr = sp.Sum(summand_factory(xb, yb, i), (i, 0, 5))
+    with pytest.raises(NotImplementedError, match="Sum/Product summand must be a bare sympy.Indexed"):
+        as_tensor(expr, cache={})
+
+
+def test_product_rejects_nested_summand():
+    i = sp.Idx("i")
+    xb = sp.IndexedBase("x")
+    expr = sp.Product(sp.Symbol("a") * xb[i], (i, 0, 5))
+    with pytest.raises(NotImplementedError, match="Sum/Product summand must be a bare sympy.Indexed"):
+        as_tensor(expr, cache={})
+
+
 def sparse_allclose(A, B, atol=1e-8):
     if np.array_equal(A.shape, B.shape) == 0:
         return False
