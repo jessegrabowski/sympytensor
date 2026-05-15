@@ -3,9 +3,10 @@ channels:
 - conda-forge
 dependencies:
   # Base dependencies
-  - sympy
-  - pytensor
-  - pymc
+  - sympy>=1.14.0
+  - pytensor>=3.0.0,<4.0.0
+  - pymc>=6.0.0,<7.0.0
+  - mpmath>=1.1.0,<1.4.0
 
   # Testing dependencies
   - pre-commit

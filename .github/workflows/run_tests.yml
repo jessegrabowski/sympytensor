@@ -24,8 +24,8 @@ jobs:
         run:
           shell: bash -leo pipefail {0}
     steps:
-    - uses: actions/checkout@v4
-    - uses: mamba-org/setup-micromamba@v2
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+    - uses: mamba-org/setup-micromamba@d7c9bd84e824b79d2af72a2d4196c7f4300d3476  # v3.0.0
       with:
         environment-file: .github/conda_envs/sympytensor.yml
         create-args: >-
@@ -44,7 +44,7 @@ jobs:
       run: |
         python -m pytest -vv --cov=sympytensor --cov-report=xml --no-cov-on-fail --cov-report term ${{ matrix.test-subset }}
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe  # v5.5.4
       with:
         token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
         name: ${{ matrix.os }}
