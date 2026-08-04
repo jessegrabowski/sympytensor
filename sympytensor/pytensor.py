@@ -605,7 +605,9 @@ def dim_handling(
     dim : int, optional
         Common number of dimensions for all inputs.  Overrides other arguments if given.
     dims : dict of sympy.Symbol to int, optional
-        Mapping from input symbols to number of dimensions.  Overrides `broadcastables` if given.
+        Mapping from input symbols to number of dimensions.  Overrides `broadcastables` if given.  Every key must
+        appear in `inputs`.  Symbols in `inputs` that are absent from `dims` are omitted from the result, and are
+        therefore treated downstream as scalars with broadcastable pattern ``()``.
     broadcastables : dict of sympy.Symbol to tuple of bool, optional
         Explicit broadcastable values.  Returned unchanged if not ``None``.
 
@@ -613,12 +615,21 @@ def dim_handling(
     -------
     result : dict of sympy.Symbol to tuple of bool
         Dictionary mapping elements of `inputs` to their broadcastable tuples.
+
+    Raises
+    ------
+    ValueError
+        If `dims` contains symbols that are not in `inputs`.
     """
     if dim is not None:
         return {s: (False,) * dim for s in inputs}
 
     if dims is not None:
-        maxdim = max(dims.values())
+        unknown_symbols = sorted(str(s) for s in set(dims) - set(inputs))
+        if unknown_symbols:
+            raise ValueError(f"`dims` contains symbols not in `inputs`: {unknown_symbols}")
+
+        maxdim = max(dims.values(), default=0)
         return {s: (False,) * d + (True,) * (maxdim - d) for s, d in dims.items()}
 
     if broadcastables is not None:
