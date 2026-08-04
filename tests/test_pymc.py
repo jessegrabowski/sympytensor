@@ -20,9 +20,9 @@ def test_match_rvs_to_symbols_simple():
         as_tensor(y_sp, cache=cache)
         sub_dict = _match_cache_to_rvs(cache)
 
-    pymc_vars = [x_pm]
-    for var_pt, var_pm in zip(cache.values(), pymc_vars):
-        assert sub_dict[var_pt] == var_pm
+    # Unpacking asserts the printer cached exactly one variable for ``x``.
+    (printed_x,) = cache.values()
+    assert sub_dict[printed_x] is x_pm
 
 
 def test_match_cache_to_rvs_duplicate_names():

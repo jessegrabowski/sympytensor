@@ -58,7 +58,7 @@ def test_MatAdd():
     expr_pt = as_tensor(X + Y + Z, cache=cache)
     X_pt, Y_pt, Z_pt = get_pt_vars(cache, ["X", "Y", "Z"])
     values = [np.arange(16.0).reshape(4, 4) * scale for scale in (1, 2, 3)]
-    result = expr_pt.eval(dict(zip([X_pt, Y_pt, Z_pt], values)))
+    result = expr_pt.eval(dict(zip([X_pt, Y_pt, Z_pt], values, strict=True)))
     assert_allclose(result, sum(values))
 
 
@@ -174,7 +174,7 @@ def test_large_dense_matrix():
     cache = {}
     jacobian_pt = as_tensor(jacobian_of_squares(symbols), cache=cache)
     values = np.arange(1.0, 1.0 + len(symbols))
-    symbol_values = dict(zip(get_pt_vars(cache, [symbol.name for symbol in symbols]), values))
+    symbol_values = dict(zip(get_pt_vars(cache, [symbol.name for symbol in symbols]), values, strict=True))
 
     assert_allclose(jacobian_pt.eval(symbol_values), np.diag(2 * values))
 
