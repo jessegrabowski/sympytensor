@@ -6,6 +6,7 @@ import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import equal_computations
+from pytensor.graph.traversal import ancestors, graph_inputs
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.variable import TensorVariable
@@ -64,7 +65,7 @@ def fgraph_of(*exprs):
     """
 
     outs = list(map(as_tensor, exprs))
-    ins = list(pytensor.graph.basic.graph_inputs(outs))
+    ins = list(graph_inputs(outs))
     ins, outs = pytensor.graph.basic.clone(ins, outs)
     return pytensor.graph.fg.FunctionGraph(ins, outs)
 
@@ -167,7 +168,7 @@ def test_add():
     "f_sp, f_pt",
     [
         (sp.Abs, pt.abs),
-        (sp.sign, pt.sgn),
+        (sp.sign, pt.sign),
         (sp.ceiling, pt.ceil),
         (sp.floor, pt.floor),
         (sp.cos, pt.cos),
@@ -303,6 +304,16 @@ def test_type_promotion_mixed():
 def test_broadcastables(bc, s):
     # TODO: Matrix broadcasting?
     assert as_tensor(s, broadcastables={s: bc}, cache={}).broadcastable == bc
+
+
+@pytest.mark.parametrize("bc, shape", [((False,), (None,)), ((True,), (1,)), ((True, False), (1, None))])
+def test_broadcastables_set_static_shape(bc, shape):
+    assert as_tensor(x, broadcastables={x: bc}, cache={}).type.shape == shape
+
+
+def test_no_broadcastable_deprecation_warning(recwarn):
+    as_tensor(x, broadcastables={x: (False, True)}, cache={})
+    assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
 
 
 cases = [
@@ -695,7 +706,7 @@ def test_cache_complex():
     expr_t = as_tensor(expr)
 
     seen = set()
-    for v in pytensor.graph.basic.ancestors([expr_t]):
+    for v in ancestors([expr_t]):
         if v.owner is None and not isinstance(v, pytensor.graph.basic.Constant):
             assert v.name in symbol_names
             assert v.name not in seen
