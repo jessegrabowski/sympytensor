@@ -61,18 +61,7 @@ minversion = "6.0"
 xfail_strict=true
 filterwarnings = ["error"]
 
-[tool.isort]
-profile = 'black'
-
-[tool.black]
-line-length = 120
-
-[tool.nbqa.mutate]
-isort = 1
-black = 1
-pyupgrade = 1
-
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 extend-exclude = ["sympytensor/_version.py", "setup.py"]
