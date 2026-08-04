@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, reduce
 from typing import Any
 
 import pytensor
@@ -55,8 +55,6 @@ mapping = {
     sp.Or: pt.bitwise_or,  # bitwise
     sp.Not: pt.invert,  # bitwise
     sp.Xor: pt.bitwise_xor,  # bitwise
-    sp.Max: pt.maximum,  # Sympy accept >2 inputs, Pytensor only 2
-    sp.Min: pt.minimum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.conjugate: pt.conj,
     # Matrices
     sp.MatAdd: pt.add,
@@ -102,6 +100,15 @@ def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[
     return data, indices, indptr
 
 
+def _static_dim(dim: Any) -> int | None:
+    """Coerce a statically known SymPy dimension to a Python ``int``, returning ``None`` for anything else.
+
+    ``getattr`` rather than attribute access so that a missing dimension (``None``) is handled alongside
+    symbolic and non-finite ones such as ``sympy.oo``.
+    """
+    return int(dim) if getattr(dim, "is_Integer", False) else None
+
+
 class PytensorPrinter(Printer):
     """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
@@ -119,6 +126,10 @@ class PytensorPrinter(Printer):
 
     def __init__(self, *args, **kwargs):
         self.cache = kwargs.pop("cache", {})
+
+        # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
+        # positionally and whose size is part of the public contract.
+        self._range_checks = {}
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
@@ -210,6 +221,20 @@ class PytensorPrinter(Printer):
         children = [self._print(arg, **kwargs) for arg in expr.args]
         return op(*children)
 
+    def _fold_binary(self, op, expr, **kwargs):
+        """Left-fold a two-input PyTensor ``op`` over the printed children of a variadic SymPy expression.
+
+        SymPy accepts any number of arguments where the PyTensor counterpart takes exactly two, so splatting the
+        children into the op the way :meth:`_print_Basic` does would fail in ``make_node``.
+        """
+        return reduce(op, [self._print(arg, **kwargs) for arg in expr.args])
+
+    def _print_Max(self, expr, **kwargs):
+        return self._fold_binary(pt.maximum, expr, **kwargs)
+
+    def _print_Min(self, expr, **kwargs):
+        return self._fold_binary(pt.minimum, expr, **kwargs)
+
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
         shape = tuple(int(d) if d.is_Integer else None for d in X.shape)
@@ -232,18 +257,24 @@ class PytensorPrinter(Printer):
             dtype = "int32"
 
         bc = kwargs.get("broadcastables", {}).get(i)
-        if i.lower is None and i.upper is None:
-            return self._get_or_create(i, dtype=dtype, shape=bc)
-        elif i.lower is None:
-            valid_range = (0, int(i.upper.evalf() + 1))
-        else:
-            valid_range = (int(i.lower.evalf()), int(i.upper.evalf() + 1))
+        i_pt = self._get_or_create(i, dtype=dtype, shape=bc)
 
-        i = self._get_or_create(i, dtype=dtype, shape=bc)
-        all_true_scalar = pt.all([pt.ge(i, valid_range[0]), pt.lt(i, valid_range[1])])
+        lower = _static_dim(i.lower)
+        upper = _static_dim(i.upper)
+        if lower is None or upper is None:
+            return i_pt
+
+        valid_range = (lower, upper + 1)
+        guard_key = (*self._get_key(i, dtype=dtype, shape=bc), valid_range)
+        if guard_key in self._range_checks:
+            return self._range_checks[guard_key]
+
+        in_range = pt.all([pt.ge(i_pt, valid_range[0]), pt.lt(i_pt, valid_range[1])])
         msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
-        return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
+        checked = CheckAndRaise(IndexError, msg)(i_pt, in_range)
+        self._range_checks[guard_key] = checked
+        return checked
 
     def _partition_matrix_elements(self, X: sp.matrices.dense.DenseMatrix, **kwargs):
         """Partition matrix entries into a numeric base array and symbolic overlay lists.
@@ -447,11 +478,7 @@ class PytensorPrinter(Printer):
         return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
-        children = [self._print(arg, **kwargs) for arg in expr.args]
-        result = children[0]
-        for child in children[1:]:
-            result = pt.dot(result, child)
-        return result
+        return self._fold_binary(pt.dot, expr, **kwargs)
 
     def _print_Inverse(self, expr, **kwargs):
         # sp.Inverse subclasses sp.MatPow, so without this override the MRO would
