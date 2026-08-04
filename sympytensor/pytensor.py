@@ -208,6 +208,8 @@ class PytensorPrinter(Printer):
 
     def _print(self, expr, **kwargs):
         """Override base _print to add fast path for numeric types."""
+        # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
+        # dispatch can reach one.
         if isinstance(expr, sp.Integer):
             return expr.p
 
@@ -417,13 +419,16 @@ class PytensorPrinter(Printer):
         result : TensorVariable
             PyTensor variable representing the matrix.
         """
-        try:
-            elements = list(X.flat())
-            if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
+        elements = list(X.flat())
+        if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
+            try:
                 arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
+            except TypeError:
+                # A complex entry is `is_number` but does not coerce to a float; the element-wise path below
+                # prints it through the normal dispatch instead.
+                pass
+            else:
                 return pt.as_tensor_variable(arr.reshape(X.shape))
-        except (AttributeError, ValueError, TypeError):
-            pass
 
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
@@ -578,9 +583,6 @@ class PytensorPrinter(Printer):
         # Return value_1 if condition_1 else evaluate remaining conditions
         p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
         return pt.switch(p_cond, p_e, p_remaining)
-
-    def _print_Integer(self, expr, **kwargs):
-        return expr.p
 
     def _print_factorial(self, expr, **kwargs):
         return self._print(sp.gamma(expr.args[0] + 1), **kwargs)
