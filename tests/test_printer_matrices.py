@@ -8,7 +8,7 @@ from pytensor.graph.basic import equal_computations
 import sympy as sp
 from sympy.abc import x, y
 
-from sympytensor.pytensor import as_tensor, pytensor_function
+from sympytensor.pytensor import _matrix_dtype, as_tensor, pytensor_function
 
 from tests.helpers import X, Y, Z, assert_graph_equal, assert_slice_equal, get_pt_vars
 
@@ -209,6 +209,56 @@ def test_dense_matrix_mixed_symbolic_numeric():
         ]
     )
     assert_allclose(result, expected)
+
+
+def test_dense_matrix_with_complex_entries():
+    M_pt = as_tensor(sp.Matrix([[1, 2 + 3 * sp.I], [sp.I, 0]]), cache={})
+
+    assert M_pt.type.dtype == "complex128"
+    assert_allclose(M_pt.eval(), np.array([[1, 2 + 3j], [1j, 0]]))
+
+
+def test_dense_matrix_complex_symbolic_entry_keeps_imaginary_part():
+    """A complex symbolic entry must widen the constant base, not be cast into a real one."""
+    a = sp.Symbol("a")
+
+    cache = {}
+    M_pt = as_tensor(sp.Matrix([[a, sp.I]]), cache=cache, dtypes={a: "complex128"})
+    a_pt = get_pt_vars(cache, "a")
+
+    assert M_pt.type.dtype == "complex128"
+    assert_allclose(M_pt.eval({a_pt: 4 + 1j}), np.array([[4 + 1j, 1j]]))
+
+
+def test_dense_matrix_real_symbol_with_complex_entry():
+    """A complex constant widens the matrix even when the symbolic entries are real."""
+    a = sp.Symbol("a")
+
+    cache = {}
+    M_pt = as_tensor(sp.Matrix([[a, sp.I]]), cache=cache)
+    a_pt = get_pt_vars(cache, "a")
+
+    assert M_pt.type.dtype == "complex128"
+    assert_allclose(M_pt.eval({a_pt: 4.0}), np.array([[4, 1j]]))
+
+
+@pytest.mark.parametrize(
+    "floatX, expected_complex", [("float64", "complex128"), ("float32", "complex64")], ids=["float64", "float32"]
+)
+def test_matrix_dtype_complex_follows_floatX(monkeypatch, floatX, expected_complex):
+    """The complex dtype tracks floatX, so a float32 configuration is not silently widened to complex128."""
+    monkeypatch.setattr(config, "floatX", floatX)
+
+    assert _matrix_dtype([1.0]) == floatX
+    assert _matrix_dtype([1j]) == expected_complex
+
+
+def test_dense_matrix_non_finite_entries_stay_real():
+    """``sympy.oo`` reports ``is_real=False`` and ``sympy.nan`` reports ``None``, but both are floats."""
+    M_pt = as_tensor(sp.Matrix([[sp.oo, sp.nan]]), cache={})
+
+    assert M_pt.type.dtype == config.floatX
+    assert_allclose(M_pt.eval(), np.array([[np.inf, np.nan]]))
 
 
 def test_dense_matrix_all_numeric_varied():

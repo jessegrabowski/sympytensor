@@ -45,3 +45,12 @@ def test_sparse_matrix_with_empty_rows():
     result = S_pt.eval({a_pt: 5.0, b_pt: 7.0})
     expected = np.array([[0, 5, 0], [0, 0, 0], [7, 0, 0]], dtype="float64")
     assert_allclose(result.toarray(), expected)
+
+
+def test_sparse_matrix_with_complex_entries():
+    S_pt = as_tensor(sp.SparseMatrix(2, 2, {(0, 1): sp.I, (1, 0): 3}), cache={})
+    S_value = S_pt.eval()
+
+    assert S_value.dtype == "complex128"
+    assert S_value.format == "csr"
+    assert sparse_allclose(S_value, sparse.csr_matrix(np.array([[0, 1j], [3, 0]])))

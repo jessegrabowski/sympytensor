@@ -1,15 +1,16 @@
+from collections.abc import Iterable
 from functools import partial, reduce
 from typing import Any
 
+import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import sympy as sp
+from pytensor import config
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
-from pytensor import config
-import numpy as np
 
 
 mapping = {
@@ -182,6 +183,44 @@ def _static_dim(dim: Any) -> int | None:
     return int(dim) if getattr(dim, "is_Integer", False) else None
 
 
+def _as_python_number(value: sp.Basic) -> float | complex:
+    """Coerce a numeric SymPy expression to a Python scalar, widening to ``complex`` only when forced.
+
+    ``float`` is attempted first because ``is_real`` is not a usable test here: ``sympy.oo`` reports
+    ``is_real=False`` and ``sympy.nan`` reports ``None``, yet both coerce to a float perfectly well.
+    """
+    evaluated = value.evalf()
+    try:
+        return float(evaluated)
+    except TypeError:
+        return complex(evaluated)
+
+
+def _matrix_dtype(
+    numeric_values: Iterable[float | complex],
+    symbolic_values: Iterable[TensorVariable] = (),
+) -> str:
+    """Narrowest dtype that holds every entry of a matrix.
+
+    Parameters
+    ----------
+    numeric_values : iterable of float or complex
+        Already-coerced numeric entries.
+    symbolic_values : iterable of TensorVariable, optional
+        Printed symbolic entries, whose own dtypes also have to fit.
+
+    Returns
+    -------
+    dtype : str
+        ``floatX``, widened if any entry is complex or of a wider dtype.
+    """
+    dtypes = [config.floatX, *(value.type.dtype for value in symbolic_values)]
+    if any(isinstance(value, complex) for value in numeric_values):
+        dtypes.append(np.result_type(config.floatX, np.complex64))
+
+    return np.result_type(*dtypes).name
+
+
 class PytensorPrinter(Printer):
     """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
@@ -220,33 +259,47 @@ class PytensorPrinter(Printer):
 
     def _get_key(
         self,
-        s: sp.Basic,
+        symbol: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
         shape: tuple | None = None,
     ) -> tuple:
-        """Get the cache key for a SymPy object.
+        """Build the cache key for a SymPy object.
+
+        Two properties of this key are contracts rather than implementation details:
+
+        - It is derived from the object's *value*, never its identity.  Equal-but-distinct SymPy objects
+          must share one cache entry, or a symbol printed twice becomes two PyTensor variables and
+          :func:`pytensor_function` rejects its own inputs as unused.
+        - ``key[0]`` is the name: :mod:`sympytensor.pymc` matches cached variables to model variables on it.
+
+        Nothing else may be stored in :attr:`cache` either -- several tests assert an exact ``len(cache)``,
+        so anything derived from a printed variable, such as a range check, needs its own dictionary.
 
         Parameters
         ----------
-        s : sympy.Basic
-            SymPy object to get key for.
+        symbol : sympy.Basic
+            SymPy object to key.
         name : str, optional
-            Name of object, if it does not have a ``name`` attribute.
+            Name of the object, for objects with no ``name`` attribute.
         dtype : str, optional
             PyTensor dtype string.
         shape : tuple, optional
             Static shape, in :class:`~pytensor.tensor.type.TensorType` form.
+
+        Returns
+        -------
+        key : tuple
+            ``(name, type, args, dtype, shape)`` -- the name first, since that is what callers match on.
         """
-
         if name is None:
-            name = s.name
+            name = symbol.name
 
-        return name, type(s), s.args, dtype, shape
+        return name, type(symbol), symbol.args, dtype, shape
 
     def _get_or_create(
         self,
-        s: sp.Basic,
+        symbol: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
         shape: tuple | None = None,
@@ -258,15 +311,14 @@ class PytensorPrinter(Printer):
         ``1`` and ``False`` becomes ``None``).
         """
 
-        # Defaults
         if name is None:
-            name = s.name
+            name = symbol.name
         if dtype is None:
             dtype = "floatX"
         if shape is None:
             shape = ()
 
-        key = self._get_key(s, name, dtype=dtype, shape=shape)
+        key = self._get_key(symbol, name, dtype=dtype, shape=shape)
 
         if key in self.cache:
             return self.cache[key]
@@ -275,16 +327,16 @@ class PytensorPrinter(Printer):
         self.cache[key] = value
         return value
 
-    def _print_Symbol(self, s, **kwargs):
-        dtype = kwargs.get("dtypes", {}).get(s)
-        bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, dtype=dtype, shape=bc)
+    def _print_Symbol(self, symbol, **kwargs):
+        dtype = kwargs.get("dtypes", {}).get(symbol)
+        broadcastable = kwargs.get("broadcastables", {}).get(symbol)
+        return self._get_or_create(symbol, dtype=dtype, shape=broadcastable)
 
-    def _print_AppliedUndef(self, s, **kwargs):
-        name = str(type(s)) + "_" + str(s.args[0])
-        dtype = kwargs.get("dtypes", {}).get(s)
-        bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, name=name, dtype=dtype, shape=bc)
+    def _print_AppliedUndef(self, applied, **kwargs):
+        name = str(type(applied)) + "_" + str(applied.args[0])
+        dtype = kwargs.get("dtypes", {}).get(applied)
+        broadcastable = kwargs.get("broadcastables", {}).get(applied)
+        return self._get_or_create(applied, name=name, dtype=dtype, shape=broadcastable)
 
     def _print_Basic(self, expr, **kwargs):
         try:
@@ -323,32 +375,32 @@ class PytensorPrinter(Printer):
     def _print_Identity(self, expr, **kwargs):
         return pt.eye(int(expr.shape[0]), dtype=pytensor.config.floatX)
 
-    def _print_Idx(self, i, **kwargs):
+    def _print_Idx(self, index, **kwargs):
         sum_idx_arrays = kwargs.get("_sum_idx_arrays")
-        if sum_idx_arrays is not None and i.name in sum_idx_arrays:
-            return sum_idx_arrays[i.name]
+        if sum_idx_arrays is not None and index.name in sum_idx_arrays:
+            return sum_idx_arrays[index.name]
 
-        dtype = kwargs.get("dtypes", {}).get(i)
+        dtype = kwargs.get("dtypes", {}).get(index)
         if dtype is None:
             dtype = "int32"
 
-        bc = kwargs.get("broadcastables", {}).get(i)
-        i_pt = self._get_or_create(i, dtype=dtype, shape=bc)
+        broadcastable = kwargs.get("broadcastables", {}).get(index)
+        index_pt = self._get_or_create(index, dtype=dtype, shape=broadcastable)
 
-        lower = _static_dim(i.lower)
-        upper = _static_dim(i.upper)
+        lower = _static_dim(index.lower)
+        upper = _static_dim(index.upper)
         if lower is None or upper is None:
-            return i_pt
+            return index_pt
 
         valid_range = (lower, upper + 1)
-        guard_key = (*self._get_key(i, dtype=dtype, shape=bc), valid_range)
+        guard_key = (*self._get_key(index, dtype=dtype, shape=broadcastable), valid_range)
         if guard_key in self._range_checks:
             return self._range_checks[guard_key]
 
-        in_range = pt.all([pt.ge(i_pt, valid_range[0]), pt.lt(i_pt, valid_range[1])])
-        msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
+        in_range = pt.all([pt.ge(index_pt, valid_range[0]), pt.lt(index_pt, valid_range[1])])
+        msg = f"Index {index.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
-        checked = CheckAndRaise(IndexError, msg)(i_pt, in_range)
+        checked = CheckAndRaise(IndexError, msg)(index_pt, in_range)
         self._range_checks[guard_key] = checked
         return checked
 
@@ -365,7 +417,8 @@ class PytensorPrinter(Printer):
         Returns
         -------
         base : numpy.ndarray
-            Array with numeric entries filled in, zeros elsewhere.
+            Array with numeric entries filled in and zeros elsewhere, at the narrowest dtype that holds
+            every entry of the matrix.
         sym_rows : list of int
             Row indices of symbolic entries.
         sym_cols : list of int
@@ -374,19 +427,26 @@ class PytensorPrinter(Printer):
             Printed PyTensor expressions for each symbolic entry.
         """
         nrows, ncols = X.shape
-        base = np.zeros((nrows, ncols), dtype=config.floatX)
+        numeric_entries = {}
         sym_rows = []
         sym_cols = []
         sym_values = []
 
-        for idx, val in enumerate(X.flat()):
-            row, col = divmod(idx, ncols)
-            if isinstance(val, sp.Basic) and val.is_number:
-                base[row, col] = float(val.evalf())
-            elif val != 0:
+        for index, value in enumerate(X.flat()):
+            row, col = divmod(index, ncols)
+            if isinstance(value, sp.Basic) and value.is_number:
+                numeric_entries[row, col] = _as_python_number(value)
+            elif value != 0:
                 sym_rows.append(row)
                 sym_cols.append(col)
-                sym_values.append(self._print(val, **kwargs))
+                sym_values.append(self._print(value, **kwargs))
+
+        # The dtype can only be chosen once every entry is known: one complex value anywhere, numeric or
+        # symbolic, widens the whole matrix, and filling a real array first would raise or drop the
+        # imaginary part.
+        base = np.zeros((nrows, ncols), dtype=_matrix_dtype(numeric_entries.values(), sym_values))
+        for (row, col), value in numeric_entries.items():
+            base[row, col] = value
 
         return base, sym_rows, sym_cols, sym_values
 
@@ -420,15 +480,9 @@ class PytensorPrinter(Printer):
             PyTensor variable representing the matrix.
         """
         elements = list(X.flat())
-        if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
-            try:
-                arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
-            except TypeError:
-                # A complex entry is `is_number` but does not coerce to a float; the element-wise path below
-                # prints it through the normal dispatch instead.
-                pass
-            else:
-                return pt.as_tensor_variable(arr.reshape(X.shape))
+        if all(isinstance(element, sp.Basic) and element.is_number for element in elements):
+            values = [_as_python_number(element) for element in elements]
+            return pt.as_tensor_variable(np.array(values, dtype=_matrix_dtype(values)).reshape(X.shape))
 
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
@@ -442,10 +496,11 @@ class PytensorPrinter(Printer):
         dod = X.todod()
         data, indices, indptr = dod_to_csr(dod, shape=X.shape)
 
-        if all(isinstance(d, sp.Basic) and d.is_number for d in data):
-            data = [float(d.evalf()) for d in data]
+        if all(isinstance(value, sp.Basic) and value.is_number for value in data):
+            values = [_as_python_number(value) for value in data]
+            data = np.array(values, dtype=_matrix_dtype(values))
         else:
-            data = [self._print(d, **kwargs) for d in data]
+            data = [self._print(value, **kwargs) for value in data]
 
         return pytensor.sparse.CSR(data, indices, indptr, X.shape)
 
