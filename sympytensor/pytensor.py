@@ -264,20 +264,34 @@ class PytensorPrinter(Printer):
         dtype: str | None = None,
         shape: tuple | None = None,
     ) -> tuple:
-        """Get the cache key for a SymPy object.
+        """Build the cache key for a SymPy object.
+
+        Two properties of this key are contracts rather than implementation details:
+
+        - It is derived from the object's *value*, never its identity.  Equal-but-distinct SymPy objects
+          must share one cache entry, or a symbol printed twice becomes two PyTensor variables and
+          :func:`pytensor_function` rejects its own inputs as unused.
+        - ``key[0]`` is the name: :mod:`sympytensor.pymc` matches cached variables to model variables on it.
+
+        Nothing else may be stored in :attr:`cache` either -- several tests assert an exact ``len(cache)``,
+        so anything derived from a printed variable, such as a range check, needs its own dictionary.
 
         Parameters
         ----------
         symbol : sympy.Basic
-            SymPy object to get key for.
+            SymPy object to key.
         name : str, optional
-            Name of object, if it does not have a ``name`` attribute.
+            Name of the object, for objects with no ``name`` attribute.
         dtype : str, optional
             PyTensor dtype string.
         shape : tuple, optional
             Static shape, in :class:`~pytensor.tensor.type.TensorType` form.
-        """
 
+        Returns
+        -------
+        key : tuple
+            ``(name, type, args, dtype, shape)`` -- the name first, since that is what callers match on.
+        """
         if name is None:
             name = symbol.name
 
