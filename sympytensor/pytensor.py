@@ -374,15 +374,11 @@ class PytensorPrinter(Printer):
 
     def _print_IndexedBase(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
-        shape = kwargs.get("shapes", None)
-        bc = kwargs.get("broadcastable", None)
+        shape = kwargs.get("shape")
 
-        if bc is not None:
-            # An explicit broadcastable pattern from the caller takes precedence over any inferred shape.
-            shape = bc
-        elif shape is None:
-            # Nothing provided — infer from the SymPy object.  Use its declared shape when available, otherwise
-            # assume a 1-d tensor with unknown length.
+        if shape is None:
+            # Printed on its own rather than through an ``Indexed``, so no caller-supplied shape is available.  Fall
+            # back to the shape declared on the SymPy object, or to a 1-d tensor of unknown length if it has none.
             if X.shape is not None:
                 shape = tuple(int(x) if x is not None else None for x in X.shape)
             else:
@@ -394,15 +390,17 @@ class PytensorPrinter(Printer):
         # Infer the shape of the indexed base.
         shape = X.base.shape
         if shape is not None:
-            shape = tuple([int(x) if x is not None else None for x in X.shape])
+            shape = tuple(int(x) if x is not None else None for x in X.shape)
         else:
             shape = (None,) * len(X.indices)
 
-        bc = kwargs.get("broadcastables", {}).get(X.base, None)
-        if bc is None:
-            bc = shape
-        indices = tuple([self._print(x, **kwargs) for x in X.indices])
-        base = self._print(X.base, shape=shape, broadcastable=bc, **kwargs)
+        # An explicit broadcastable pattern for the base takes precedence over the inferred shape.
+        broadcastable = kwargs.get("broadcastables", {}).get(X.base)
+        if broadcastable is not None:
+            shape = broadcastable
+
+        indices = tuple(self._print(index, **kwargs) for index in X.indices)
+        base = self._print(X.base, shape=shape, **kwargs)
 
         return base[indices]
 

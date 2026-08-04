@@ -46,7 +46,7 @@ def test_indexedbase_with_index():
     cache = {}
     x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
     assert x.type.shape == ()
-    assert x.owner.inputs[0].ndim == 2
+    assert x.owner.inputs[0].type.shape == (None, None)
     assert len(cache) == 3
 
     i_pt, j_pt, x_pt = get_pt_vars(cache, ["i", "j", "x"])
@@ -63,12 +63,22 @@ def test_indexedbase_with_index_and_no_range():
     cache = {}
     x = as_tensor(sp.IndexedBase("x")[i, j], cache=cache)
     assert x.type.shape == ()
-    assert x.owner.inputs[0].ndim == 2
+    assert x.owner.inputs[0].type.shape == (None, None)
     assert len(cache) == 3
 
     i_pt, j_pt, x_pt = get_pt_vars(cache, ["i", "j", "x"])
 
     assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
+
+
+def test_indexedbase_explicit_broadcastables_wins():
+    i = sp.Idx("i")
+    j = sp.Idx("j")
+    x = sp.IndexedBase("x", shape=(10, 10))
+
+    cache = {}
+    result = as_tensor(x[i, j], cache=cache, broadcastables={x: (True, False)})
+    assert result.owner.inputs[0].type.shape == (1, None)
 
 
 def test_Idx_non_concrete_bounds_unguarded():
@@ -110,13 +120,13 @@ def test_Idx_guard_emitted_once():
 def test_sliced_indexbase_1d():
     cache = {}
     x = sp.IndexedBase("x", shape=(10,))
-    x = as_tensor(x[7], cache=cache)
+    result = as_tensor(x[7], cache=cache)
     x_pt = get_pt_vars(cache, ["x"])
 
-    assert x.type.shape == ()
-    assert x.owner.inputs[0].type.shape == (10,)
+    assert result.type.shape == ()
+    assert result.owner.inputs[0].type.shape == (10,)
     assert len(cache) == 1
-    assert x.eval({x_pt: np.arange(10)}) == 7.0
+    assert result.eval({x_pt: np.arange(10)}) == 7.0
 
 
 def test_sliced_indexbase_2d():
@@ -128,7 +138,6 @@ def test_sliced_indexbase_2d():
 
     assert len(cache) == 1
     assert x1.type.shape == ()
-    assert x1.owner.inputs[0].ndim == 2
     assert x1.owner.inputs[0].type.shape == (10, 10)
     assert x1.eval({x_pt: np.arange(100).reshape(10, 10)}) == 1.0
     assert x2.eval({x_pt: np.arange(100).reshape(10, 10)}) == 54.0
@@ -252,8 +261,8 @@ def test_reduction_unsupported_op_raises():
 
 
 def test_negative_literal_index():
-    xb = sp.IndexedBase("x", shape=(10,))
+    x = sp.IndexedBase("x", shape=(10,))
     cache = {}
-    result = as_tensor(xb[-1], cache=cache)
+    result = as_tensor(x[-1], cache=cache)
     x_pt = get_pt_vars(cache, "x")
     assert_allclose(result.eval({x_pt: np.arange(10, dtype="float64")}), 9.0)
