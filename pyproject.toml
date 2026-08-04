@@ -58,10 +58,7 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 xfail_strict=true
-filterwarnings = [
-    "error",
-    "ignore::DeprecationWarning",
-    "ignore::FutureWarning"]
+filterwarnings = ["error"]
 
 [tool.isort]
 profile = 'black'
