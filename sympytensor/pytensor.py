@@ -483,10 +483,11 @@ class PytensorPrinter(Printer):
         dod = X.todod()
         data, indices, indptr = dod_to_csr(dod, shape=X.shape)
 
-        if all(isinstance(d, sp.Basic) and d.is_number for d in data):
-            data = [float(d.evalf()) for d in data]
+        if all(isinstance(value, sp.Basic) and value.is_number for value in data):
+            values = [_as_python_number(value) for value in data]
+            data = np.array(values, dtype=_matrix_dtype(values))
         else:
-            data = [self._print(d, **kwargs) for d in data]
+            data = [self._print(value, **kwargs) for value in data]
 
         return pytensor.sparse.CSR(data, indices, indptr, X.shape)
 
