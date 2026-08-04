@@ -173,7 +173,7 @@ def SympyDeterministic(
 
     Returns
     -------
-    expr_pm : TensorVariable
+    deterministic : TensorVariable
         The new deterministic variable registered in the model.
     """
     global pm
@@ -201,6 +201,4 @@ def SympyDeterministic(
     replace_dict = {**auto_dict, **explicit_dict}
 
     pymc_expr = graph_replace(pytensor_expr, replace_dict, strict=True)
-    expr_pm = pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)
-
-    return expr_pm
+    return pm.Deterministic(name=name, var=pymc_expr, model=model, dims=dims)

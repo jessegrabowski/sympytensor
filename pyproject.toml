@@ -65,3 +65,14 @@ filterwarnings = ["error"]
 line-length = 120
 target-version = "py312"
 extend-exclude = ["sympytensor/_version.py", "setup.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "C901", "ARG", "SIM", "UP", "RET"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Every ``_print_*`` handler must accept the printer's dispatch signature, so the
+# ones that need no keyword arguments still declare ``**kwargs``.
+"sympytensor/pytensor.py" = ["ARG002"]

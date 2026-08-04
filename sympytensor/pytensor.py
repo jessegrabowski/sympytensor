@@ -458,20 +458,15 @@ class PytensorPrinter(Printer):
         if shape is None:
             # Printed on its own rather than through an ``Indexed``, so no caller-supplied shape is available.  Fall
             # back to the shape declared on the SymPy object, or to a 1-d tensor of unknown length if it has none.
-            if X.shape is not None:
-                shape = tuple(_static_dim(dim) for dim in X.shape)
-            else:
-                shape = (None,)
+            shape = tuple(_static_dim(dim) for dim in X.shape) if X.shape is not None else (None,)
 
         return self._get_or_create(X, dtype=dtype, shape=shape)
 
     def _print_Indexed(self, X, **kwargs):
         # Infer the shape of the indexed base, keeping only its statically known dimensions.
         base_shape = X.base.shape
-        if base_shape is not None:
-            shape = tuple(_static_dim(dim) for dim in base_shape)
-        else:
-            shape = (None,) * len(X.indices)
+        unknown_shape = (None,) * len(X.indices)
+        shape = tuple(_static_dim(dim) for dim in base_shape) if base_shape is not None else unknown_shape
 
         # An explicit broadcastable pattern for the base takes precedence over the inferred shape.
         broadcastable = kwargs.get("broadcastables", {}).get(X.base)
