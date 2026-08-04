@@ -105,6 +105,15 @@ def dod_to_csr(
     return data, idxs, pointers, shape
 
 
+def _static_dim(dim: Any) -> int | None:
+    """Coerce a statically known SymPy dimension to a Python ``int``, returning ``None`` for anything else.
+
+    ``getattr`` rather than attribute access so that a missing dimension (``None``) is handled alongside
+    symbolic and non-finite ones such as ``sympy.oo``.
+    """
+    return int(dim) if getattr(dim, "is_Integer", False) else None
+
+
 class PytensorPrinter(Printer):
     """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
@@ -249,18 +258,18 @@ class PytensorPrinter(Printer):
             dtype = "int32"
 
         bc = kwargs.get("broadcastables", {}).get(i)
-        if i.lower is None and i.upper is None:
-            return self._get_or_create(i, dtype=dtype, shape=bc)
-        elif i.lower is None:
-            valid_range = (0, int(i.upper.evalf() + 1))
-        else:
-            valid_range = (int(i.lower.evalf()), int(i.upper.evalf() + 1))
+        i_pt = self._get_or_create(i, dtype=dtype, shape=bc)
 
-        i = self._get_or_create(i, dtype=dtype, shape=bc)
-        all_true_scalar = pt.all([pt.ge(i, valid_range[0]), pt.lt(i, valid_range[1])])
+        lower = _static_dim(i.lower)
+        upper = _static_dim(i.upper)
+        if lower is None or upper is None:
+            return i_pt
+
+        valid_range = (lower, upper + 1)
+        in_range = pt.all([pt.ge(i_pt, valid_range[0]), pt.lt(i_pt, valid_range[1])])
         msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
-        return CheckAndRaise(IndexError, msg)(i, all_true_scalar)
+        return CheckAndRaise(IndexError, msg)(i_pt, in_range)
 
     def _partition_matrix_elements(self, X: sp.matrices.dense.DenseMatrix, **kwargs):
         """Partition matrix entries into a numeric base array and symbolic overlay lists.

@@ -1,12 +1,18 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
+from pytensor.graph.traversal import ancestors
+from pytensor.raise_op import CheckAndRaise
 
 import sympy as sp
 
 from sympytensor.pytensor import PytensorPrinter, as_tensor
 
 from tests.helpers import get_pt_vars
+
+
+def count_range_checks(x):
+    return sum(var.owner is not None and isinstance(var.owner.op, CheckAndRaise) for var in ancestors([x]))
 
 
 def test_indexedbase():
@@ -63,6 +69,30 @@ def test_indexedbase_with_index_and_no_range():
     i_pt, j_pt, x_pt = get_pt_vars(cache, ["i", "j", "x"])
 
     assert x.eval({x_pt: np.arange(20).reshape((10, 2)), i_pt: 5, j_pt: 1}) == 11.0
+
+
+def test_Idx_non_concrete_bounds_unguarded():
+    k = sp.Idx("k", (1, sp.oo))
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("x")[k], cache=cache)
+    assert count_range_checks(x) == 0
+
+    k_pt, x_pt = get_pt_vars(cache, ["k", "x"])
+    assert x.eval({x_pt: np.arange(10.0), k_pt: 3}) == 3.0
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="_print_Indexed coerces base dimensions with a bare int(); fixed by the _static_dim read in commit 1.5",
+)
+def test_indexed_symbolic_shape():
+    n = sp.Symbol("n", integer=True)
+    i = sp.Idx("i")
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("A", shape=(n,))[i], cache=cache)
+    assert x.type.shape == ()
 
 
 def test_sliced_indexbase_1d():
