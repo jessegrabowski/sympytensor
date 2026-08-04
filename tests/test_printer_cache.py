@@ -7,7 +7,7 @@ from pytensor.graph.traversal import ancestors
 import sympy as sp
 from sympy.abc import x, y, z
 
-from sympytensor.pytensor import as_tensor, global_cache
+from sympytensor.pytensor import PytensorPrinter, as_tensor, global_cache
 
 from tests.helpers import X, assert_graph_equal, f_t, get_pt_vars
 
@@ -38,6 +38,12 @@ def test_global_cache():
         assert as_tensor(s) is st
 
     assert len(global_cache) == 3
+
+
+def test_printer_cache_none_uses_global():
+    """An explicit ``None`` must resolve to the global cache, not be stored as ``None`` and fail on first lookup."""
+    assert PytensorPrinter(cache=None, settings={}).cache is global_cache
+    assert PytensorPrinter(settings={}).cache is global_cache
 
 
 def test_cache_types_distinct():
