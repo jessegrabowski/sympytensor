@@ -259,7 +259,7 @@ class PytensorPrinter(Printer):
 
     def _get_key(
         self,
-        s: sp.Basic,
+        symbol: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
         shape: tuple | None = None,
@@ -268,7 +268,7 @@ class PytensorPrinter(Printer):
 
         Parameters
         ----------
-        s : sympy.Basic
+        symbol : sympy.Basic
             SymPy object to get key for.
         name : str, optional
             Name of object, if it does not have a ``name`` attribute.
@@ -279,13 +279,13 @@ class PytensorPrinter(Printer):
         """
 
         if name is None:
-            name = s.name
+            name = symbol.name
 
-        return name, type(s), s.args, dtype, shape
+        return name, type(symbol), symbol.args, dtype, shape
 
     def _get_or_create(
         self,
-        s: sp.Basic,
+        symbol: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
         shape: tuple | None = None,
@@ -297,15 +297,14 @@ class PytensorPrinter(Printer):
         ``1`` and ``False`` becomes ``None``).
         """
 
-        # Defaults
         if name is None:
-            name = s.name
+            name = symbol.name
         if dtype is None:
             dtype = "floatX"
         if shape is None:
             shape = ()
 
-        key = self._get_key(s, name, dtype=dtype, shape=shape)
+        key = self._get_key(symbol, name, dtype=dtype, shape=shape)
 
         if key in self.cache:
             return self.cache[key]
@@ -314,16 +313,16 @@ class PytensorPrinter(Printer):
         self.cache[key] = value
         return value
 
-    def _print_Symbol(self, s, **kwargs):
-        dtype = kwargs.get("dtypes", {}).get(s)
-        bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, dtype=dtype, shape=bc)
+    def _print_Symbol(self, symbol, **kwargs):
+        dtype = kwargs.get("dtypes", {}).get(symbol)
+        broadcastable = kwargs.get("broadcastables", {}).get(symbol)
+        return self._get_or_create(symbol, dtype=dtype, shape=broadcastable)
 
-    def _print_AppliedUndef(self, s, **kwargs):
-        name = str(type(s)) + "_" + str(s.args[0])
-        dtype = kwargs.get("dtypes", {}).get(s)
-        bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, name=name, dtype=dtype, shape=bc)
+    def _print_AppliedUndef(self, applied, **kwargs):
+        name = str(type(applied)) + "_" + str(applied.args[0])
+        dtype = kwargs.get("dtypes", {}).get(applied)
+        broadcastable = kwargs.get("broadcastables", {}).get(applied)
+        return self._get_or_create(applied, name=name, dtype=dtype, shape=broadcastable)
 
     def _print_Basic(self, expr, **kwargs):
         try:
@@ -362,32 +361,32 @@ class PytensorPrinter(Printer):
     def _print_Identity(self, expr, **kwargs):
         return pt.eye(int(expr.shape[0]), dtype=pytensor.config.floatX)
 
-    def _print_Idx(self, i, **kwargs):
+    def _print_Idx(self, index, **kwargs):
         sum_idx_arrays = kwargs.get("_sum_idx_arrays")
-        if sum_idx_arrays is not None and i.name in sum_idx_arrays:
-            return sum_idx_arrays[i.name]
+        if sum_idx_arrays is not None and index.name in sum_idx_arrays:
+            return sum_idx_arrays[index.name]
 
-        dtype = kwargs.get("dtypes", {}).get(i)
+        dtype = kwargs.get("dtypes", {}).get(index)
         if dtype is None:
             dtype = "int32"
 
-        bc = kwargs.get("broadcastables", {}).get(i)
-        i_pt = self._get_or_create(i, dtype=dtype, shape=bc)
+        broadcastable = kwargs.get("broadcastables", {}).get(index)
+        index_pt = self._get_or_create(index, dtype=dtype, shape=broadcastable)
 
-        lower = _static_dim(i.lower)
-        upper = _static_dim(i.upper)
+        lower = _static_dim(index.lower)
+        upper = _static_dim(index.upper)
         if lower is None or upper is None:
-            return i_pt
+            return index_pt
 
         valid_range = (lower, upper + 1)
-        guard_key = (*self._get_key(i, dtype=dtype, shape=bc), valid_range)
+        guard_key = (*self._get_key(index, dtype=dtype, shape=broadcastable), valid_range)
         if guard_key in self._range_checks:
             return self._range_checks[guard_key]
 
-        in_range = pt.all([pt.ge(i_pt, valid_range[0]), pt.lt(i_pt, valid_range[1])])
-        msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
+        in_range = pt.all([pt.ge(index_pt, valid_range[0]), pt.lt(index_pt, valid_range[1])])
+        msg = f"Index {index.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
-        checked = CheckAndRaise(IndexError, msg)(i_pt, in_range)
+        checked = CheckAndRaise(IndexError, msg)(index_pt, in_range)
         self._range_checks[guard_key] = checked
         return checked
 
