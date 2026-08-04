@@ -1,5 +1,4 @@
 import numpy as np
-import pytensor
 from numpy.testing import assert_allclose
 from scipy import sparse
 
@@ -16,17 +15,18 @@ def test_sparse_matrix():
     y = sp.SparseMatrix(2, 1, {(0, 0): a, (1, 0): b})
     z = X @ y
 
-    X_pt = as_tensor(X)
+    X_value = as_tensor(X).eval()
 
-    assert X_pt.owner.op == pytensor.sparse.CSR
-    assert sparse_allclose(X_pt.eval(), sparse.csr_matrix([[0, 2], [3, 0]]))
+    assert X_value.format == "csr"
+    assert sparse_allclose(X_value, sparse.csr_matrix([[0, 2], [3, 0]]))
 
     cache = {}
     z_pt = as_tensor(z, cache=cache)
     a_pt, b_pt = get_pt_vars(cache, ["a", "b"])
+    z_value = z_pt.eval({a_pt: 1, b_pt: 2})
 
-    assert z_pt.owner.op == pytensor.sparse.CSR
-    assert sparse_allclose(z_pt.eval({a_pt: 1, b_pt: 2}), sparse.csr_matrix([[4], [3]]))
+    assert z_value.format == "csr"
+    assert sparse_allclose(z_value, sparse.csr_matrix([[4], [3]]))
 
 
 def test_dod_to_csr_empty():
