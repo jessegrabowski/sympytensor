@@ -1,4 +1,5 @@
 import numpy as np
+import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.traversal import ancestors
@@ -6,7 +7,7 @@ from pytensor.raise_op import CheckAndRaise
 
 import sympy as sp
 
-from sympytensor.pytensor import PytensorPrinter, as_tensor
+from sympytensor.pytensor import PytensorPrinter, _apply_unused_index_factors, _reduction_index_arrays, as_tensor
 
 from tests.helpers import get_pt_vars
 
@@ -263,3 +264,42 @@ def test_negative_literal_index():
     result = as_tensor(x[-1], cache=cache)
     x_pt = get_pt_vars(cache, "x")
     assert_allclose(result.eval({x_pt: np.arange(10, dtype="float64")}), 9.0)
+
+
+@pytest.mark.parametrize(
+    "used_in_order, expected_shapes",
+    [
+        (["i"], {"i": (3,)}),
+        (["i", "j"], {"i": (3, 1), "j": (1, 4)}),
+        (["j", "i"], {"j": (4, 1), "i": (1, 3)}),
+    ],
+    ids=["one_index_undimshuffled", "i_first", "j_first"],
+)
+def test_reduction_index_arrays_axes(used_in_order, expected_shapes):
+    arrays = _reduction_index_arrays({"i": (0, 2), "j": (1, 4)}, used_in_order)
+    values = {name: array.eval() for name, array in arrays.items()}
+
+    assert {name: value.shape for name, value in values.items()} == expected_shapes
+
+    expected_ranges = {"i": [0, 1, 2], "j": [1, 2, 3, 4]}
+    for name, value in values.items():
+        assert_allclose(value.ravel(), expected_ranges[name])
+
+
+@pytest.mark.parametrize(
+    "unused_names, op, expected",
+    [
+        (["i"], "sum", 3.0 * 5),
+        (["i"], "prod", 3.0**5),
+        (["i", "k"], "sum", 3.0 * 5 * 3),
+        (["i", "k"], "prod", (3.0**5) ** 3),
+        ([], "sum", 3.0),
+    ],
+    ids=["sum_one", "prod_one", "sum_two", "prod_two", "none_unused"],
+)
+def test_apply_unused_index_factors(unused_names, op, expected):
+    # "i" ranges over 5 values and "k" over 3.
+    sum_specs = {"i": (0, 4), "k": (2, 4)}
+    result = _apply_unused_index_factors(pt.as_tensor(3.0), sum_specs, unused_names, op)
+
+    assert_allclose(result.eval(), expected)

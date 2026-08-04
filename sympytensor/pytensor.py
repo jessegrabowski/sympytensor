@@ -61,8 +61,8 @@ mapping = {
     sp.HadamardProduct: pt.mul,
     sp.Trace: pt.trace,
     sp.Determinant: pt.linalg.det,
-    sp.Inverse: pt.linalg.inv,
     sp.Transpose: pt.matrix_transpose,
+    # sp.Inverse is handled by _print_Inverse; it subclasses sp.MatPow and must not reach this mapping.
 }
 
 
@@ -100,6 +100,79 @@ def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[
     return data, indices, indptr
 
 
+def _reduction_index_arrays(
+    sum_specs: dict[str, tuple[int, int]],
+    used_in_order: list[str],
+) -> dict[str, TensorVariable]:
+    """One :func:`pytensor.tensor.arange` per summation index, each broadcast onto its own leading axis.
+
+    Giving every index its own axis means the summand broadcasts correctly no matter which order the indices
+    appear in it, and the reduction can then collapse the leading ``len(used_in_order)`` axes.
+
+    Parameters
+    ----------
+    sum_specs : dict of str to tuple of int
+        Inclusive ``(start, stop)`` range for each summation index, keyed by index name.
+    used_in_order : list of str
+        Names of the indices that occur in the summand, in the order axes should be assigned to them.
+
+    Returns
+    -------
+    arrays : dict of str to TensorVariable
+        One index array per name in `used_in_order`.
+    """
+    n_used = len(used_in_order)
+    arrays = {}
+
+    for axis, name in enumerate(used_in_order):
+        start, stop = sum_specs[name]
+        index_range = pt.arange(start, stop + 1, dtype="int64")
+
+        if n_used > 1:
+            pattern = ["x"] * n_used
+            pattern[axis] = 0
+            index_range = index_range.dimshuffle(*pattern)
+
+        arrays[name] = index_range
+
+    return arrays
+
+
+def _apply_unused_index_factors(
+    result: TensorVariable,
+    sum_specs: dict[str, tuple[int, int]],
+    unused_names: list[str],
+    op: str,
+) -> TensorVariable:
+    r"""A summation index absent from the summand scales (Sum) or exponentiates (Product).
+
+    The summand is constant over such an index, so :math:`\sum_{i=a}^{b} c = c \, (b - a + 1)` and
+    :math:`\prod_{i=a}^{b} c = c^{\,b - a + 1}`.
+
+    Parameters
+    ----------
+    result : TensorVariable
+        Reduction result before the correction.
+    sum_specs : dict of str to tuple of int
+        Inclusive ``(start, stop)`` range for each summation index, keyed by index name.
+    unused_names : list of str
+        Names of the summation indices that do not occur in the summand.
+    op : {"sum", "prod"}
+        Reduction operation.
+
+    Returns
+    -------
+    result : TensorVariable
+        Reduction result corrected for the unused indices.
+    """
+    for name in unused_names:
+        start, stop = sum_specs[name]
+        size = stop - start + 1
+        result = result * size if op == "sum" else result**size
+
+    return result
+
+
 def _static_dim(dim: Any) -> int | None:
     """Coerce a statically known SymPy dimension to a Python ``int``, returning ``None`` for anything else.
 
@@ -135,6 +208,8 @@ class PytensorPrinter(Printer):
 
     def _print(self, expr, **kwargs):
         """Override base _print to add fast path for numeric types."""
+        # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
+        # dispatch can reach one.
         if isinstance(expr, sp.Integer):
             return expr.p
 
@@ -344,13 +419,16 @@ class PytensorPrinter(Printer):
         result : TensorVariable
             PyTensor variable representing the matrix.
         """
-        try:
-            elements = list(X.flat())
-            if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
+        elements = list(X.flat())
+        if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
+            try:
                 arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
+            except TypeError:
+                # A complex entry is `is_number` but does not coerce to a float; the element-wise path below
+                # prints it through the normal dispatch instead.
+                pass
+            else:
                 return pt.as_tensor_variable(arr.reshape(X.shape))
-        except (AttributeError, ValueError, TypeError):
-            pass
 
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
@@ -438,35 +516,18 @@ class PytensorPrinter(Printer):
         sum_specs = {var.name: (int(start), int(stop)) for var, start, stop in sum_args}
         sum_index_names = [var.name for var, _, _ in sum_args]
 
-        used = {sym.name for sym in summand.free_symbols if isinstance(sym, sp.Idx) and sym.name in sum_specs}
-        used_in_order = [name for name in sum_index_names if name in used]
-        n_used = len(used_in_order)
+        used_names = {sym.name for sym in summand.free_symbols if isinstance(sym, sp.Idx) and sym.name in sum_specs}
+        used_in_order = [name for name in sum_index_names if name in used_names]
+        unused_names = [name for name in sum_index_names if name not in used_names]
 
-        sum_idx_arrays = {}
-        for axis, name in enumerate(used_in_order):
-            start, stop = sum_specs[name]
-            rng = pt.arange(start, stop + 1, dtype="int64")
-            if n_used > 1:
-                pattern = ["x"] * n_used
-                pattern[axis] = 0
-                rng = rng.dimshuffle(*pattern)
-            sum_idx_arrays[name] = rng
+        summand_kwargs = {**kwargs, "_sum_idx_arrays": _reduction_index_arrays(sum_specs, used_in_order)}
+        result = self._print(summand, **summand_kwargs)
 
-        kwargs_with_arrays = {**kwargs, "_sum_idx_arrays": sum_idx_arrays}
-        result = self._print(summand, **kwargs_with_arrays)
-
-        if n_used:
+        if used_in_order:
             reducer = pt.sum if op == "sum" else pt.prod
-            result = reducer(result, axis=tuple(range(n_used)))
+            result = reducer(result, axis=tuple(range(len(used_in_order))))
 
-        for name in sum_index_names:
-            if name in used:
-                continue
-            start, stop = sum_specs[name]
-            size = stop - start + 1
-            result = result * size if op == "sum" else result**size
-
-        return result
+        return _apply_unused_index_factors(result, sum_specs, unused_names, op)
 
     def _print_Sum(self, X, **kwargs) -> TensorVariable:
         """Convert SymPy Sum to PyTensor sum reduction."""
@@ -522,9 +583,6 @@ class PytensorPrinter(Printer):
         # Return value_1 if condition_1 else evaluate remaining conditions
         p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
         return pt.switch(p_cond, p_e, p_remaining)
-
-    def _print_Integer(self, expr, **kwargs):
-        return expr.p
 
     def _print_factorial(self, expr, **kwargs):
         return self._print(sp.gamma(expr.args[0] + 1), **kwargs)

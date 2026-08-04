@@ -25,6 +25,23 @@ def test_match_rvs_to_symbols_simple():
         assert sub_dict[var_pt] == var_pm
 
 
+def test_match_cache_to_rvs_duplicate_names():
+    cache = {}
+    as_tensor(sp.IndexedBase("x", shape=(10, 10)), cache=cache)
+    as_tensor(sp.IndexedBase("x", shape=(10, 7)), cache=cache)
+
+    # Guards the assertions below: were the two shapes to stop caching separately, a lookup that collapses
+    # entries by name would satisfy them trivially instead of dropping a substitution.
+    assert len(cache) == 2
+
+    with pm.Model():
+        x_pm = pm.Normal("x")
+        sub_dict = _match_cache_to_rvs(cache)
+
+    assert set(sub_dict) == set(cache.values())
+    assert set(sub_dict.values()) == {x_pm}
+
+
 def test_make_sympy_deterministic_simple():
     x_sp = sp.Symbol("x")
     y_sp = x_sp + 1
