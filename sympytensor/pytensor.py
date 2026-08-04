@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, reduce
 from typing import Any
 
 import pytensor
@@ -55,8 +55,6 @@ mapping = {
     sp.Or: pt.bitwise_or,  # bitwise
     sp.Not: pt.invert,  # bitwise
     sp.Xor: pt.bitwise_xor,  # bitwise
-    sp.Max: pt.maximum,  # Sympy accept >2 inputs, Pytensor only 2
-    sp.Min: pt.minimum,  # Sympy accept >2 inputs, Pytensor only 2
     sp.conjugate: pt.conj,
     # Matrices
     sp.MatAdd: pt.add,
@@ -214,6 +212,20 @@ class PytensorPrinter(Printer):
             ) from None
         children = [self._print(arg, **kwargs) for arg in expr.args]
         return op(*children)
+
+    def _fold_binary(self, op, expr, **kwargs):
+        """Left-fold a two-input PyTensor ``op`` over the printed children of a variadic SymPy expression.
+
+        SymPy accepts any number of arguments where the PyTensor counterpart takes exactly two, so splatting the
+        children into the op the way :meth:`_print_Basic` does would fail in ``make_node``.
+        """
+        return reduce(op, [self._print(arg, **kwargs) for arg in expr.args])
+
+    def _print_Max(self, expr, **kwargs):
+        return self._fold_binary(pt.maximum, expr, **kwargs)
+
+    def _print_Min(self, expr, **kwargs):
+        return self._fold_binary(pt.minimum, expr, **kwargs)
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
@@ -452,11 +464,7 @@ class PytensorPrinter(Printer):
         return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
-        children = [self._print(arg, **kwargs) for arg in expr.args]
-        result = children[0]
-        for child in children[1:]:
-            result = pt.dot(result, child)
-        return result
+        return self._fold_binary(pt.dot, expr, **kwargs)
 
     def _print_Inverse(self, expr, **kwargs):
         # sp.Inverse subclasses sp.MatPow, so without this override the MRO would
