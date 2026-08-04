@@ -19,7 +19,7 @@ mapping = {
     sp.Add: pt.add,
     sp.Mul: pt.mul,
     sp.Abs: pt.abs,
-    sp.sign: pt.sgn,
+    sp.sign: pt.sign,
     sp.ceiling: pt.ceil,
     sp.floor: pt.floor,
     sp.log: pt.log,
@@ -509,12 +509,12 @@ class PytensorPrinter(Printer):
         return self._print(sp.gamma(expr.args[0] + 1), **kwargs)
 
     def _print_Derivative(self, deriv, **kwargs):
-        from pytensor.gradient import Rop
+        from pytensor.gradient import pushforward
 
         rv = self._print(deriv.expr, **kwargs)
         for var in deriv.variables:
             var = self._print(var, **kwargs)
-            rv = Rop(rv, var, pt.ones_like(var))
+            rv = pushforward(rv, var, tangents=pt.ones_like(var))
         return rv
 
     def emptyPrinter(self, expr):
