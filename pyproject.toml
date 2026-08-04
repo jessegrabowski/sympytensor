@@ -36,6 +36,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+    "ruff==0.16.1",
 ]
 
 [tool.hatch.version]
