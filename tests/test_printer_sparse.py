@@ -30,11 +30,10 @@ def test_sparse_matrix():
 
 
 def test_dod_to_csr_empty():
-    data, idxs, pointers, shape = dod_to_csr({}, shape=(3, 4))
+    data, indices, indptr = dod_to_csr({}, shape=(3, 4))
     assert data == []
-    assert idxs == []
-    assert pointers == [0, 0, 0, 0]
-    assert shape == (3, 4)
+    assert indices == []
+    assert indptr == [0, 0, 0, 0]
 
 
 def test_sparse_matrix_with_empty_rows():

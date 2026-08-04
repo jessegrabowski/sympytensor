@@ -68,9 +68,7 @@ mapping = {
 }
 
 
-def dod_to_csr(
-    dod: dict[int, dict[int, Any]], shape: tuple[int, int]
-) -> tuple[list, list[int], list[int], tuple[int, int]]:
+def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[list, list[int], list[int]]:
     """Convert a dictionary-of-dictionaries sparse representation to compressed sparse row (CSR).
 
     Parameters
@@ -88,23 +86,20 @@ def dod_to_csr(
         Column indices corresponding to each entry in `data`.
     indptr : list of int
         Row pointer array of length ``n_rows + 1``.
-    shape : tuple of int
-        The input `shape`, passed through unchanged.
     """
-    n_rows, n_cols = shape
+    n_rows, _ = shape
 
     data = []
-    idxs = []
-    pointers = [0]
+    indices = []
+    indptr = [0]
 
     for row in range(n_rows):
-        if row in dod:
-            for col in sorted(dod[row].keys()):
-                data.append(dod[row][col])
-                idxs.append(col)
-        pointers.append(len(data))
+        for col in sorted(dod.get(row, {})):
+            data.append(dod[row][col])
+            indices.append(col)
+        indptr.append(len(data))
 
-    return data, idxs, pointers, shape
+    return data, indices, indptr
 
 
 class PytensorPrinter(Printer):
@@ -335,14 +330,14 @@ class PytensorPrinter(Printer):
         Optimizes for the all-numeric case by bypassing printer dispatch.
         """
         dod = X.todod()
-        data, idxs, pointers, shape = dod_to_csr(dod, shape=X.shape)
+        data, indices, indptr = dod_to_csr(dod, shape=X.shape)
 
         if all(isinstance(d, sp.Basic) and d.is_number for d in data):
             data = [float(d.evalf()) for d in data]
         else:
             data = [self._print(d, **kwargs) for d in data]
 
-        return pytensor.sparse.CSR(data, idxs, pointers, shape)
+        return pytensor.sparse.CSR(data, indices, indptr, X.shape)
 
     _print_ImmutableSparseMatrix = _print_MutableSparseMatrix = _print_SparseMatrix
 
@@ -605,7 +600,9 @@ def dim_handling(
     dim : int, optional
         Common number of dimensions for all inputs.  Overrides other arguments if given.
     dims : dict of sympy.Symbol to int, optional
-        Mapping from input symbols to number of dimensions.  Overrides `broadcastables` if given.
+        Mapping from input symbols to number of dimensions.  Overrides `broadcastables` if given.  Every key must
+        appear in `inputs`.  Symbols in `inputs` that are absent from `dims` are omitted from the result, and are
+        therefore treated downstream as scalars with broadcastable pattern ``()``.
     broadcastables : dict of sympy.Symbol to tuple of bool, optional
         Explicit broadcastable values.  Returned unchanged if not ``None``.
 
@@ -613,12 +610,21 @@ def dim_handling(
     -------
     result : dict of sympy.Symbol to tuple of bool
         Dictionary mapping elements of `inputs` to their broadcastable tuples.
+
+    Raises
+    ------
+    ValueError
+        If `dims` contains symbols that are not in `inputs`.
     """
     if dim is not None:
         return {s: (False,) * dim for s in inputs}
 
     if dims is not None:
-        maxdim = max(dims.values())
+        unknown_symbols = sorted(str(s) for s in set(dims) - set(inputs))
+        if unknown_symbols:
+            raise ValueError(f"`dims` contains symbols not in `inputs`: {unknown_symbols}")
+
+        maxdim = max(dims.values(), default=0)
         return {s: (False,) * d + (True,) * (maxdim - d) for s, d in dims.items()}
 
     if broadcastables is not None:

@@ -54,6 +54,15 @@ def test_dim_handling():
     assert dim_handling([x], broadcastables={x: (False,)}) == {x: (False,)}
 
 
+def test_dim_handling_rejects_unknown_symbols():
+    with pytest.raises(ValueError, match=re.escape("`dims` contains symbols not in `inputs`: ['y']")):
+        dim_handling([x], dims={y: 1})
+
+
+def test_dim_handling_empty_dims():
+    assert dim_handling([x], dims={}) == {}
+
+
 @pytest.mark.parametrize(
     "kwargs, test_inputs, expected_result",
     [
