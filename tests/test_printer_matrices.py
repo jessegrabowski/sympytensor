@@ -2,18 +2,15 @@ import numpy as np
 import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
+from pytensor import config
 from pytensor.graph.basic import equal_computations
-from pytensor.scalar.basic import ScalarType
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.subtensor import AdvancedIncSubtensor
-from pytensor.tensor.variable import TensorVariable
 
 import sympy as sp
 from sympy.abc import x, y
 
 from sympytensor.pytensor import as_tensor, pytensor_function
 
-from tests.helpers import X, Y, Z, assert_graph_equal, get_pt_vars
+from tests.helpers import X, Y, Z, assert_graph_equal, assert_slice_equal, get_pt_vars
 
 
 def test_Trace():
@@ -42,36 +39,31 @@ def test_HadamardProduct():
 
 
 def test_MatMul():
-    expr = X * Y * Z
     cache = {}
-    expr_t = as_tensor(expr, cache=cache)
-    Xt, Yt, Zt = get_pt_vars(cache, ["X", "Y", "Z"])
-    expected = pt.dot(pt.dot(Xt, Yt), Zt)
-    assert_graph_equal(expr_t, expected)
+    expr_pt = as_tensor(X * Y * Z, cache=cache)
+    X_pt, Y_pt, Z_pt = get_pt_vars(cache, ["X", "Y", "Z"])
+    assert_graph_equal(expr_pt, pt.dot(pt.dot(X_pt, Y_pt), Z_pt))
 
 
 def test_Transpose():
-    assert isinstance(as_tensor(X.T).owner.op, DimShuffle)
+    cache = {}
+    expr_pt = as_tensor(X.T, cache=cache)
+    X_pt = get_pt_vars(cache, "X")
+    X_val = np.arange(16.0).reshape(4, 4)
+    assert_allclose(expr_pt.eval({X_pt: X_val}), X_val.T)
 
 
 def test_MatAdd():
-    expr = X + Y + Z
-    assert isinstance(as_tensor(expr).owner.op, Elemwise)
+    cache = {}
+    expr_pt = as_tensor(X + Y + Z, cache=cache)
+    X_pt, Y_pt, Z_pt = get_pt_vars(cache, ["X", "Y", "Z"])
+    values = [np.arange(16.0).reshape(4, 4) * scale for scale in (1, 2, 3)]
+    result = expr_pt.eval(dict(zip([X_pt, Y_pt, Z_pt], values)))
+    assert_allclose(result, sum(values))
 
 
 def test_slice():
     assert as_tensor(slice(1, 2, 3)) == slice(1, 2, 3)
-
-    def assert_slice_equal(s1, s2):
-        for attr in ["start", "stop", "step"]:
-            a1 = getattr(s1, attr)
-            a2 = getattr(s2, attr)
-            if a1 is None or a2 is None:
-                assert a1 is None and a2 is None, f"slice.{attr} mismatch: {a1} vs {a2}"
-            elif isinstance(a1, TensorVariable) and isinstance(a2, TensorVariable):
-                assert_graph_equal(a1, a2)
-            else:
-                assert a1 == a2, f"slice.{attr} mismatch: {a1} vs {a2}"
 
     dtypes = {x: "int32", y: "int32"}
     cache = {}
@@ -85,84 +77,109 @@ def test_slice():
     assert_slice_equal(actual_slice, slice(1, x_pt, 3))
 
 
-def test_MatrixSlice():
-    cache = {}
-
+def test_MatrixSlice_constant_bounds():
     n = sp.Symbol("n", integer=True)
     X = sp.MatrixSymbol("X", n, n)
 
-    Y = X[1:2:3, 4:5:6]
-    Yt = as_tensor(Y, cache=cache)
+    cache = {}
+    Y_pt = as_tensor(X[1:2:3, 4:5:6], cache=cache)
+    X_pt = get_pt_vars(cache, "X")
 
-    assert tuple(Yt.owner.op.idx_list) == (slice(0, 1, 2), slice(3, 4, 5))
-    assert Yt.owner.inputs[0] == as_tensor(X, cache=cache)
-    assert all(Yt.owner.inputs[i].data == i for i in range(1, 7))
+    X_val = np.arange(100.0).reshape(10, 10)
+    assert_allclose(Y_pt.eval({X_pt: X_val}), X_val[1:2:3, 4:5:6])
 
-    k = sp.Symbol("k")
-    start, stop, step = 4, k, 2
-    Y = X[start:stop:step]
-    Yt = as_tensor(Y, dtypes={n: "int32", k: "int32"})
-    stop_pos = Yt.owner.op.idx_list[0].stop
-    assert Yt.owner.inputs[1 + stop_pos].type == ScalarType("int32")
+
+def test_MatrixSlice_symbolic_bound():
+    n = sp.Symbol("n", integer=True)
+    k = sp.Symbol("k", integer=True)
+    X = sp.MatrixSymbol("X", n, n)
+
+    cache = {}
+    Y_pt = as_tensor(X[4:k:2], dtypes={n: "int32", k: "int32"}, cache=cache)
+    X_pt, k_pt, n_pt = get_pt_vars(cache, ["X", "k", "n"])
+
+    assert (k_pt.type.dtype, n_pt.type.dtype) == ("int32", "int32")
+
+    X_val = np.arange(100.0).reshape(10, 10)
+    result = Y_pt.eval({X_pt: X_val, k_pt: np.int32(9), n_pt: np.int32(10)})
+    assert_allclose(result, X_val[4:9:2, :])
 
 
 def test_BlockMatrix():
     n = sp.Symbol("n", integer=True)
     A, B, C, D = (sp.MatrixSymbol(name, n, n) for name in "ABCD")
     cache = {}
-    Block = sp.BlockMatrix([[A, B], [C, D]])
-    Blockt = as_tensor(Block, cache=cache)
-    At, Bt, Ct, Dt = get_pt_vars(cache, ["A", "B", "C", "D"])
-    solutions = [
-        pt.join(0, pt.join(1, At, Bt), pt.join(1, Ct, Dt)),
-        pt.join(1, pt.join(0, At, Ct), pt.join(0, Bt, Dt)),
+    block_pt = as_tensor(sp.BlockMatrix([[A, B], [C, D]]), cache=cache)
+    A_pt, B_pt, C_pt, D_pt = get_pt_vars(cache, ["A", "B", "C", "D"])
+    accepted_graphs = [
+        pt.join(0, pt.join(1, A_pt, B_pt), pt.join(1, C_pt, D_pt)),
+        pt.join(1, pt.join(0, A_pt, C_pt), pt.join(0, B_pt, D_pt)),
     ]
-    assert any(equal_computations([Blockt], [sol]) for sol in solutions)
+    assert any(equal_computations([block_pt], [graph]) for graph in accepted_graphs)
 
 
-def test_DenseMatrix():
+def jacobian_of_squares(symbols):
+    """Jacobian of ``[x**2 for x in symbols]`` -- a diagonal matrix holding ``2 * x``."""
+    return sp.Matrix([symbol**2 for symbol in symbols]).jacobian(symbols)
+
+
+@pytest.mark.parametrize("MatrixType", [sp.Matrix, sp.ImmutableMatrix], ids=["Matrix", "ImmutableMatrix"])
+def test_DenseMatrix(MatrixType):
     theta = sp.Symbol("theta")
-    for MatrixType in [sp.Matrix, sp.ImmutableMatrix]:
-        X = MatrixType([[sp.cos(theta), -sp.sin(theta)], [sp.sin(theta), sp.cos(theta)]])
-        cache = {}
-        tX = as_tensor(X, cache=cache)
-        assert isinstance(tX, TensorVariable)
-        assert isinstance(tX.owner.op, AdvancedIncSubtensor)
+    rotation = MatrixType([[sp.cos(theta), -sp.sin(theta)], [sp.sin(theta), sp.cos(theta)]])
 
-        theta_pt = get_pt_vars(cache, ["theta"])
-        theta_val = np.pi / 4
-        result = tX.eval({theta_pt: theta_val})
-        expected = np.array(
-            [
-                [np.cos(theta_val), -np.sin(theta_val)],
-                [np.sin(theta_val), np.cos(theta_val)],
-            ]
-        )
-        assert_allclose(result, expected)
+    cache = {}
+    X_pt = as_tensor(rotation, cache=cache)
+    theta_pt = get_pt_vars(cache, "theta")
+
+    theta_val = np.pi / 4
+    expected = np.array(
+        [
+            [np.cos(theta_val), -np.sin(theta_val)],
+            [np.sin(theta_val), np.cos(theta_val)],
+        ]
+    )
+    assert_allclose(X_pt.eval({theta_pt: theta_val}), expected)
+
+
+def test_dense_matrix_fills_numeric_base_then_sets_symbolic_entries():
+    """A symbolic dense matrix becomes a constant base plus one set-subtensor.
+
+    Stacking every cell would evaluate identically, so the structure is what
+    distinguishes the two strategies: the numeric entries have to be folded into the
+    constant base, leaving only the symbolic ones in the graph.
+    """
+    symbols = [sp.Symbol(f"x_{i}") for i in range(3)]
+
+    cache = {}
+    jacobian_pt = as_tensor(jacobian_of_squares(symbols), cache=cache)
+    x_pt = get_pt_vars(cache, [symbol.name for symbol in symbols])
+
+    diagonal = pt.as_tensor([0, 1, 2])
+    base = pt.as_tensor_variable(np.zeros((3, 3), dtype=config.floatX))
+    expected = base[diagonal, diagonal].set([2 * symbol_pt for symbol_pt in x_pt])
+
+    assert_graph_equal(jacobian_pt, expected)
 
 
 def test_empty_matrix():
     X = sp.Matrix([[0 for _ in range(20)] for _ in range(20)])
-    tX = as_tensor(X)
-    assert np.allclose(tX.eval(), np.zeros((20, 20)))
+    X_pt = as_tensor(X)
+    assert np.allclose(X_pt.eval(), np.zeros((20, 20)))
 
 
 def test_large_dense_matrix():
-    vars = [sp.Symbol(f"x_{i}") for i in range(100)]
+    symbols = [sp.Symbol(f"x_{i}") for i in range(100)]
 
-    eqs = sp.Matrix([x**2 for x in vars])
-    jac = eqs.jacobian(vars)
+    cache = {}
+    jacobian_pt = as_tensor(jacobian_of_squares(symbols), cache=cache)
+    values = np.arange(1.0, 1.0 + len(symbols))
+    symbol_values = dict(zip(get_pt_vars(cache, [symbol.name for symbol in symbols]), values))
 
-    jac_pt = as_tensor(jac)
+    assert_allclose(jacobian_pt.eval(symbol_values), np.diag(2 * values))
 
-    assert isinstance(jac_pt.owner.op, AdvancedIncSubtensor)
 
-    small_eqs = sp.Matrix([x**2 for x in vars[:3]])
-    small_jac = small_eqs.jacobian(vars[:3])
-    small_jac_pt = as_tensor(small_jac)
-
-    assert isinstance(small_jac_pt.owner.op, AdvancedIncSubtensor)
-
+def test_large_constant_matrix_is_folded():
     const_matrix = sp.ones(50, 50)
     const_pt = as_tensor(const_matrix)
     assert const_pt.owner is None
@@ -248,7 +265,7 @@ def test_Inverse_times_vector():
 def test_MatPow_large_exponent_uses_matrix_power():
     A = sp.MatrixSymbol("A", 3, 3)
     f = pytensor_function([A], [A**8], dims={A: 2})
-    dot_nodes = [n for n in f.maker.fgraph.toposort() if "dot" in type(n.op).__name__.lower()]
+    dot_nodes = [node for node in f.maker.fgraph.toposort() if "dot" in type(node.op).__name__.lower()]
     assert len(dot_nodes) <= 4
 
 

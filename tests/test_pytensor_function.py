@@ -92,6 +92,19 @@ function_dim_cases = [
 ]
 
 
+UNKNOWN_DIM_LENGTH = 5
+
+
+def call_with_ones(f):
+    """Call a compiled function on all-ones inputs, returning its outputs as a list."""
+    in_values = [
+        np.ones(tuple(UNKNOWN_DIM_LENGTH if dim is None else dim for dim in var.type.shape)) for var in f.input_storage
+    ]
+    out_values = f(*in_values)
+
+    return out_values if isinstance(out_values, list) else [out_values]
+
+
 @pytest.mark.parametrize(
     "inputs, outputs, in_dims, out_dims",
     function_dim_cases,
@@ -99,18 +112,11 @@ function_dim_cases = [
 )
 def test_printing_scalar_function(inputs, outputs, in_dims, out_dims):
     f = pytensor_function(inputs, outputs, dims=in_dims)
-
     assert isinstance(f, Function)
 
-    in_values = [np.ones(tuple(d if d is not None else 5 for d in i.type.shape)) for i in f.input_storage]
-    out_values = f(*in_values)
-    if not isinstance(out_values, list):
-        out_values = [out_values]
+    out_values = call_with_ones(f)
 
-    assert len(out_dims) == len(out_values)
-    for d, value in zip(out_dims, out_values):
-        assert isinstance(value, np.ndarray)
-        assert value.ndim == d
+    assert [value.ndim for value in out_values] == out_dims
 
 
 def test_pytensor_function_raises_on_bad_kwarg():
