@@ -114,18 +114,19 @@ class PytensorPrinter(Printer):
 
     Parameters
     ----------
-    cache : dict
-        Cache dictionary to use.  If ``None`` (default) will use the global cache.  To create a printer which does
-        not depend on or alter global state pass an empty dictionary.  Note: the dictionary is not copied on
-        initialization of the printer and will be updated in-place, so using the same dict object when creating
-        multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means the cache
-        is shared between all these applications.
+    cache : dict, optional
+        Cache dictionary to use.  If ``None`` (the default) the module-level :data:`global_cache` is used.  To create a
+        printer which does not depend on or alter global state pass an empty dictionary.  Note: the dictionary is not
+        copied on initialization of the printer and will be updated in-place, so using the same dict object when
+        creating multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means
+        the cache is shared between all these applications.
     """
 
     printmethod = "_pytensor"
 
     def __init__(self, *args, **kwargs):
-        self.cache = kwargs.pop("cache", {})
+        cache = kwargs.pop("cache", None)
+        self.cache = global_cache if cache is None else cache
 
         # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
         # positionally and whose size is part of the public contract.
@@ -602,9 +603,6 @@ def as_tensor(
     result : TensorVariable
         A variable corresponding to the expression's value in a PyTensor symbolic expression graph.
     """
-    if cache is None:
-        cache = global_cache
-
     return PytensorPrinter(cache=cache, settings={}).doprint(expr, **kwargs)
 
 
@@ -680,7 +678,9 @@ def pytensor_function(
         Sequence of expressions which constitute the output(s) of the function.  The free symbols of each expression
         must be a subset of `inputs`.
     cache : dict, optional
-        Cached PyTensor variables (see :attr:`PytensorPrinter.cache`).  Defaults to the module-level global cache.
+        Cached PyTensor variables (see :attr:`PytensorPrinter.cache`).  Deliberately defaults to a fresh empty
+        dictionary rather than to the :data:`global_cache` used by :func:`as_tensor`, so that a compiled function does
+        not share symbol identity with unrelated callers.  Pass ``cache=global_cache`` to opt into sharing.
     dtypes : dict, optional
         Passed to :meth:`PytensorPrinter.doprint`.
     broadcastables : dict of sympy.Symbol to tuple of bool, optional

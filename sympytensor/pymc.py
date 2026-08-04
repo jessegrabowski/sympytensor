@@ -82,8 +82,7 @@ def _resolve_model_value(model_value: str | TensorVariable, model: Model) -> Ten
         result = getattr(model, model_value, None)
         if result is None:
             raise AttributeError(
-                f"Variable '{model_value}' not found in the PyMC model. "
-                f"Available variables: {[v.name for v in model.value_vars]}"
+                f"Variable '{model_value}' not found in the PyMC model. Available variables: {sorted(model.named_vars)}"
             )
         return result
     raise TypeError(f"Replacement values must be TensorVariables or strings, got {type(model_value)}")

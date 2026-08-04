@@ -1,3 +1,5 @@
+import ast
+
 import pymc as pm
 import pytensor.tensor as pt
 import pytest
@@ -5,7 +7,7 @@ import sympy as sp
 from numpy.testing import assert_allclose
 
 from sympytensor import SympyDeterministic, as_tensor
-from sympytensor.pymc import _match_cache_to_rvs
+from sympytensor.pymc import _match_cache_to_rvs, _resolve_model_value
 
 
 def test_match_rvs_to_symbols_simple():
@@ -202,10 +204,20 @@ def test_replacements_raises_missing_symbol_in_cache():
 def test_replacements_raises_missing_model_variable():
     x = sp.Symbol("x")
 
-    with pm.Model():
+    with pm.Model() as model:
         pm.Normal("z")
-        with pytest.raises(AttributeError, match="not found in the PyMC model"):
+        pm.HalfNormal("sigma")
+
+        with pytest.raises(AttributeError, match="not found in the PyMC model") as exc_info:
             SympyDeterministic("y", x + 1, replacements={"x": "nonexistent"})
+
+    suggested_names = ast.literal_eval(str(exc_info.value).split("Available variables: ")[1])
+
+    # Every suggested name must be accepted by the lookup that raised.  `sigma` is transformed, so suggesting from
+    # `model.value_vars` would print the unusable `sigma_log__` instead.
+    assert "sigma" in suggested_names
+    for name in suggested_names:
+        assert _resolve_model_value(name, model).name == name
 
 
 def test_replacements_raises_invalid_key_type():
