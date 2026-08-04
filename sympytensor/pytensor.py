@@ -68,9 +68,7 @@ mapping = {
 }
 
 
-def dod_to_csr(
-    dod: dict[int, dict[int, Any]], shape: tuple[int, int]
-) -> tuple[list, list[int], list[int], tuple[int, int]]:
+def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[list, list[int], list[int]]:
     """Convert a dictionary-of-dictionaries sparse representation to compressed sparse row (CSR).
 
     Parameters
@@ -88,23 +86,20 @@ def dod_to_csr(
         Column indices corresponding to each entry in `data`.
     indptr : list of int
         Row pointer array of length ``n_rows + 1``.
-    shape : tuple of int
-        The input `shape`, passed through unchanged.
     """
-    n_rows, n_cols = shape
+    n_rows, _ = shape
 
     data = []
-    idxs = []
-    pointers = [0]
+    indices = []
+    indptr = [0]
 
     for row in range(n_rows):
-        if row in dod:
-            for col in sorted(dod[row].keys()):
-                data.append(dod[row][col])
-                idxs.append(col)
-        pointers.append(len(data))
+        for col in sorted(dod.get(row, {})):
+            data.append(dod[row][col])
+            indices.append(col)
+        indptr.append(len(data))
 
-    return data, idxs, pointers, shape
+    return data, indices, indptr
 
 
 class PytensorPrinter(Printer):
@@ -335,14 +330,14 @@ class PytensorPrinter(Printer):
         Optimizes for the all-numeric case by bypassing printer dispatch.
         """
         dod = X.todod()
-        data, idxs, pointers, shape = dod_to_csr(dod, shape=X.shape)
+        data, indices, indptr = dod_to_csr(dod, shape=X.shape)
 
         if all(isinstance(d, sp.Basic) and d.is_number for d in data):
             data = [float(d.evalf()) for d in data]
         else:
             data = [self._print(d, **kwargs) for d in data]
 
-        return pytensor.sparse.CSR(data, idxs, pointers, shape)
+        return pytensor.sparse.CSR(data, indices, indptr, X.shape)
 
     _print_ImmutableSparseMatrix = _print_MutableSparseMatrix = _print_SparseMatrix
 
