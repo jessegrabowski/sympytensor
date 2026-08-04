@@ -92,10 +92,6 @@ def test_Idx_non_concrete_bounds_unguarded():
     assert x.eval({x_pt: np.arange(10.0), k_pt: 3}) == 3.0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="_print_Indexed coerces base dimensions with a bare int(); fixed by the _static_dim read in commit 1.5",
-)
 def test_indexed_symbolic_shape():
     n = sp.Symbol("n", integer=True)
     i = sp.Idx("i")
@@ -103,6 +99,7 @@ def test_indexed_symbolic_shape():
     cache = {}
     x = as_tensor(sp.IndexedBase("A", shape=(n,))[i], cache=cache)
     assert x.type.shape == ()
+    assert x.owner.inputs[0].type.shape == (None,)
 
 
 def test_Idx_guard_emitted_once():
