@@ -305,6 +305,16 @@ def test_broadcastables(bc, s):
     assert as_tensor(s, broadcastables={s: bc}, cache={}).broadcastable == bc
 
 
+@pytest.mark.parametrize("bc, shape", [((False,), (None,)), ((True,), (1,)), ((True, False), (1, None))])
+def test_broadcastables_set_static_shape(bc, shape):
+    assert as_tensor(x, broadcastables={x: bc}, cache={}).type.shape == shape
+
+
+def test_no_broadcastable_deprecation_warning(recwarn):
+    as_tensor(x, broadcastables={x: (False, True)}, cache={})
+    assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+
+
 cases = [
     [(), (), ()],
     [(False,), (False,), (False,)],

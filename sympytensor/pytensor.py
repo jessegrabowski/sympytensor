@@ -141,7 +141,7 @@ class PytensorPrinter(Printer):
         s: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
-        broadcastable: tuple | None = None,
+        shape: tuple | None = None,
     ) -> tuple:
         """Get the cache key for a SymPy object.
 
@@ -153,54 +153,56 @@ class PytensorPrinter(Printer):
             Name of object, if it does not have a ``name`` attribute.
         dtype : str, optional
             PyTensor dtype string.
-        broadcastable : tuple, optional
-            Broadcastable pattern.
+        shape : tuple, optional
+            Static shape, in :class:`~pytensor.tensor.type.TensorType` form.
         """
 
         if name is None:
             name = s.name
 
-        return name, type(s), s.args, dtype, broadcastable
+        return name, type(s), s.args, dtype, shape
 
     def _get_or_create(
         self,
         s: sp.Basic,
         name: str | None = None,
         dtype: str | None = None,
-        broadcastable: tuple | None = None,
         shape: tuple | None = None,
     ) -> TensorVariable:
-        """Get the PyTensor variable for a SymPy symbol from the cache, or create it if it does not exist."""
+        """Get the PyTensor variable for a SymPy symbol from the cache, or create it if it does not exist.
+
+        `shape` is passed straight through to :class:`~pytensor.tensor.type.TensorType`, which accepts a mix of
+        integers, ``None`` for unknown dimensions, and booleans (a broadcastable pattern, where ``True`` becomes
+        ``1`` and ``False`` becomes ``None``).
+        """
 
         # Defaults
         if name is None:
             name = s.name
         if dtype is None:
             dtype = "floatX"
-        if broadcastable is None:
-            broadcastable = ()
         if shape is None:
             shape = ()
 
-        key = self._get_key(s, name, dtype=dtype, broadcastable=broadcastable)
+        key = self._get_key(s, name, dtype=dtype, shape=shape)
 
         if key in self.cache:
             return self.cache[key]
 
-        value = pt.tensor(name=name, dtype=dtype, broadcastable=broadcastable, shape=shape)
+        value = pt.tensor(name=name, dtype=dtype, shape=shape)
         self.cache[key] = value
         return value
 
     def _print_Symbol(self, s, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(s)
         bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, dtype=dtype, broadcastable=bc)
+        return self._get_or_create(s, dtype=dtype, shape=bc)
 
     def _print_AppliedUndef(self, s, **kwargs):
         name = str(type(s)) + "_" + str(s.args[0])
         dtype = kwargs.get("dtypes", {}).get(s)
         bc = kwargs.get("broadcastables", {}).get(s)
-        return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
+        return self._get_or_create(s, name=name, dtype=dtype, shape=bc)
 
     def _print_Basic(self, expr, **kwargs):
         try:
@@ -216,7 +218,7 @@ class PytensorPrinter(Printer):
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
         shape = tuple(int(d) if d.is_Integer else None for d in X.shape)
-        return self._get_or_create(X, dtype=dtype, broadcastable=shape, shape=shape)
+        return self._get_or_create(X, dtype=dtype, shape=shape)
 
     def _print_ZeroMatrix(self, expr, **kwargs):
         rows, cols = expr.shape
@@ -236,13 +238,13 @@ class PytensorPrinter(Printer):
 
         bc = kwargs.get("broadcastables", {}).get(i)
         if i.lower is None and i.upper is None:
-            return self._get_or_create(i, dtype=dtype, broadcastable=bc)
+            return self._get_or_create(i, dtype=dtype, shape=bc)
         elif i.lower is None:
             valid_range = (0, int(i.upper.evalf() + 1))
         else:
             valid_range = (int(i.lower.evalf()), int(i.upper.evalf() + 1))
 
-        i = self._get_or_create(i, dtype=dtype, broadcastable=bc)
+        i = self._get_or_create(i, dtype=dtype, shape=bc)
         all_true_scalar = pt.all([pt.ge(i, valid_range[0]), pt.lt(i, valid_range[1])])
         msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
@@ -349,24 +351,18 @@ class PytensorPrinter(Printer):
         shape = kwargs.get("shapes", None)
         bc = kwargs.get("broadcastable", None)
 
-        if shape is None and bc is None:
-            # No explicit shape/broadcastable provided — infer from the SymPy
-            # object.  Use its declared shape when available, otherwise assume
-            # a 1-d tensor with unknown length.
+        if bc is not None:
+            # An explicit broadcastable pattern from the caller takes precedence over any inferred shape.
+            shape = bc
+        elif shape is None:
+            # Nothing provided — infer from the SymPy object.  Use its declared shape when available, otherwise
+            # assume a 1-d tensor with unknown length.
             if X.shape is not None:
                 shape = tuple(int(x) if x is not None else None for x in X.shape)
             else:
                 shape = (None,)
-            # For IndexedBase the broadcastable signature matches the shape:
-            # concrete dimensions are non-broadcastable (int), unknown ones are
-            # None, which is exactly what _get_or_create expects.
-            bc = shape
-        elif shape is None:
-            # Broadcastable was provided but shape was not — mirror it so both
-            # arguments stay consistent.
-            shape = bc
 
-        return self._get_or_create(X, dtype=dtype, broadcastable=bc, shape=shape)
+        return self._get_or_create(X, dtype=dtype, shape=shape)
 
     def _print_Indexed(self, X, **kwargs):
         # Infer the shape of the indexed base.
