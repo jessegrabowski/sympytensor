@@ -95,6 +95,18 @@ def test_indexed_symbolic_shape():
     assert x.type.shape == ()
 
 
+def test_Idx_guard_emitted_once():
+    i = sp.Idx("i", range=10)
+
+    cache = {}
+    x = as_tensor(sp.IndexedBase("A")[i] * sp.IndexedBase("B")[i], cache=cache)
+    assert count_range_checks(x) == 1
+
+    i_pt, a_pt, b_pt = get_pt_vars(cache, ["i", "A", "B"])
+    with pytest.raises(IndexError):
+        x.eval({a_pt: np.zeros(10), b_pt: np.zeros(10), i_pt: 10})
+
+
 def test_sliced_indexbase_1d():
     cache = {}
     x = sp.IndexedBase("x", shape=(10,))

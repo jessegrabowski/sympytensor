@@ -131,6 +131,10 @@ class PytensorPrinter(Printer):
 
     def __init__(self, *args, **kwargs):
         self.cache = kwargs.pop("cache", {})
+
+        # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
+        # positionally and whose size is part of the public contract.
+        self._range_checks = {}
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
@@ -266,10 +270,16 @@ class PytensorPrinter(Printer):
             return i_pt
 
         valid_range = (lower, upper + 1)
+        guard_key = (*self._get_key(i, dtype=dtype, shape=bc), valid_range)
+        if guard_key in self._range_checks:
+            return self._range_checks[guard_key]
+
         in_range = pt.all([pt.ge(i_pt, valid_range[0]), pt.lt(i_pt, valid_range[1])])
         msg = f"Index {i.name} out of valid range {valid_range[0]} - {valid_range[1]}"
 
-        return CheckAndRaise(IndexError, msg)(i_pt, in_range)
+        checked = CheckAndRaise(IndexError, msg)(i_pt, in_range)
+        self._range_checks[guard_key] = checked
+        return checked
 
     def _partition_matrix_elements(self, X: sp.matrices.dense.DenseMatrix, **kwargs):
         """Partition matrix entries into a numeric base array and symbolic overlay lists.
