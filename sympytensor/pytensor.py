@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from functools import partial, reduce
 from typing import Any
 
@@ -180,6 +181,44 @@ def _static_dim(dim: Any) -> int | None:
     symbolic and non-finite ones such as ``sympy.oo``.
     """
     return int(dim) if getattr(dim, "is_Integer", False) else None
+
+
+def _as_python_number(value: sp.Basic) -> float | complex:
+    """Coerce a numeric SymPy expression to a Python scalar, widening to ``complex`` only when forced.
+
+    ``float`` is attempted first because ``is_real`` is not a usable test here: ``sympy.oo`` reports
+    ``is_real=False`` and ``sympy.nan`` reports ``None``, yet both coerce to a float perfectly well.
+    """
+    evaluated = value.evalf()
+    try:
+        return float(evaluated)
+    except TypeError:
+        return complex(evaluated)
+
+
+def _matrix_dtype(
+    numeric_values: Iterable[float | complex],
+    symbolic_values: Iterable[TensorVariable] = (),
+) -> str:
+    """Narrowest dtype that holds every entry of a matrix.
+
+    Parameters
+    ----------
+    numeric_values : iterable of float or complex
+        Already-coerced numeric entries.
+    symbolic_values : iterable of TensorVariable, optional
+        Printed symbolic entries, whose own dtypes also have to fit.
+
+    Returns
+    -------
+    dtype : str
+        ``floatX``, widened if any entry is complex or of a wider dtype.
+    """
+    dtypes = [config.floatX, *(value.type.dtype for value in symbolic_values)]
+    if any(isinstance(value, complex) for value in numeric_values):
+        dtypes.append(np.result_type(config.floatX, np.complex64))
+
+    return np.result_type(*dtypes).name
 
 
 class PytensorPrinter(Printer):
@@ -365,7 +404,8 @@ class PytensorPrinter(Printer):
         Returns
         -------
         base : numpy.ndarray
-            Array with numeric entries filled in, zeros elsewhere.
+            Array with numeric entries filled in and zeros elsewhere, at the narrowest dtype that holds
+            every entry of the matrix.
         sym_rows : list of int
             Row indices of symbolic entries.
         sym_cols : list of int
@@ -374,19 +414,26 @@ class PytensorPrinter(Printer):
             Printed PyTensor expressions for each symbolic entry.
         """
         nrows, ncols = X.shape
-        base = np.zeros((nrows, ncols), dtype=config.floatX)
+        numeric_entries = {}
         sym_rows = []
         sym_cols = []
         sym_values = []
 
-        for idx, val in enumerate(X.flat()):
-            row, col = divmod(idx, ncols)
-            if isinstance(val, sp.Basic) and val.is_number:
-                base[row, col] = float(val.evalf())
-            elif val != 0:
+        for index, value in enumerate(X.flat()):
+            row, col = divmod(index, ncols)
+            if isinstance(value, sp.Basic) and value.is_number:
+                numeric_entries[row, col] = _as_python_number(value)
+            elif value != 0:
                 sym_rows.append(row)
                 sym_cols.append(col)
-                sym_values.append(self._print(val, **kwargs))
+                sym_values.append(self._print(value, **kwargs))
+
+        # The dtype can only be chosen once every entry is known: one complex value anywhere, numeric or
+        # symbolic, widens the whole matrix, and filling a real array first would raise or drop the
+        # imaginary part.
+        base = np.zeros((nrows, ncols), dtype=_matrix_dtype(numeric_entries.values(), sym_values))
+        for (row, col), value in numeric_entries.items():
+            base[row, col] = value
 
         return base, sym_rows, sym_cols, sym_values
 
@@ -420,15 +467,9 @@ class PytensorPrinter(Printer):
             PyTensor variable representing the matrix.
         """
         elements = list(X.flat())
-        if all(isinstance(elem, sp.Basic) and elem.is_number for elem in elements):
-            try:
-                arr = np.array([float(elem.evalf()) for elem in elements], dtype=config.floatX)
-            except TypeError:
-                # A complex entry is `is_number` but does not coerce to a float; the element-wise path below
-                # prints it through the normal dispatch instead.
-                pass
-            else:
-                return pt.as_tensor_variable(arr.reshape(X.shape))
+        if all(isinstance(element, sp.Basic) and element.is_number for element in elements):
+            values = [_as_python_number(element) for element in elements]
+            return pt.as_tensor_variable(np.array(values, dtype=_matrix_dtype(values)).reshape(X.shape))
 
         return self._print_DenseMatrix_setsubtensor(X, **kwargs)
 
