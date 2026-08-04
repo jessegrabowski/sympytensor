@@ -61,8 +61,8 @@ mapping = {
     sp.HadamardProduct: pt.mul,
     sp.Trace: pt.trace,
     sp.Determinant: pt.linalg.det,
-    sp.Inverse: pt.linalg.inv,
     sp.Transpose: pt.matrix_transpose,
+    # sp.Inverse is handled by _print_Inverse; it subclasses sp.MatPow and must not reach this mapping.
 }
 
 
