@@ -32,29 +32,34 @@ def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     -------
     sub_dict : dict of TensorVariable to TensorVariable
         Mapping from the cached printer variables to the corresponding model random variables.
+
+    Raises
+    ------
+    ValueError
+        If any cached symbol has no matching model variable or deterministic.
     """
     global pm
     if pm is None:
         import pymc as pm
 
     pymc_model = pm.modelcontext(model)
-    found_params = []
-    var_names = [info[0] for info in cache.keys()]
+
+    # Iterate the cache rather than a name to variable lookup: two entries can share a symbol name at
+    # different shapes, and collapsing them by name would silently drop one of the substitutions.
     sub_dict = {}
+    found_names = set()
+    for cache_key, pytensor_var in cache.items():
+        symbol_name = cache_key[0]
+        model_var = getattr(pymc_model, symbol_name, None)
+        if model_var is not None:
+            found_names.add(symbol_name)
+            sub_dict[pytensor_var] = model_var
 
-    with pymc_model:
-        for info, pytensor_var in cache.items():
-            param_name, constructor, broadcast, dtype, shape = info
-            param = getattr(pymc_model, param_name, None)
-            if param is not None:
-                found_params.append(param.name)
-                sub_dict[pytensor_var] = param
-
-    missing_params = list(set(var_names) - set(found_params))
-    if len(missing_params) > 0:
+    missing_names = sorted({cache_key[0] for cache_key in cache} - found_names)
+    if missing_names:
         raise ValueError(
             "The following symbols were found in the provided sympy expression, but are not found among model "
-            "variables or deterministics: " + ", ".join(missing_params)
+            "variables or deterministics: " + ", ".join(missing_names)
         )
 
     return sub_dict
