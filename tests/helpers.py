@@ -3,6 +3,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import graph_inputs
+from pytensor.tensor.variable import TensorVariable
 from scipy import sparse
 
 import sympy as sp
@@ -85,6 +86,21 @@ def assert_graph_equal(actual, expected, in_actual=None, in_expected=None):
         f"  Actual:   {pytensor.printing.debugprint(actual, file='str')}\n"
         f"  Expected: {pytensor.printing.debugprint(expected, file='str')}"
     )
+
+
+def assert_slice_equal(actual, expected):
+    """Assert two slices agree attribute by attribute, comparing symbolic bounds as graphs."""
+    for attr in ("start", "stop", "step"):
+        a, e = getattr(actual, attr), getattr(expected, attr)
+        assert (a is None) == (e is None), f"slice.{attr} mismatch: {a} vs {e}"
+
+        if a is None:
+            continue
+
+        if isinstance(a, TensorVariable):
+            assert_graph_equal(a, e)
+        else:
+            assert a == e, f"slice.{attr} mismatch: {a} vs {e}"
 
 
 def sparse_allclose(A, B, atol=1e-8):

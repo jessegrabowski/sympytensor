@@ -13,7 +13,7 @@ from sympy.abc import x, y
 
 from sympytensor.pytensor import as_tensor, pytensor_function
 
-from tests.helpers import X, Y, Z, assert_graph_equal, get_pt_vars
+from tests.helpers import X, Y, Z, assert_graph_equal, assert_slice_equal, get_pt_vars
 
 
 def test_Trace():
@@ -61,17 +61,6 @@ def test_MatAdd():
 
 def test_slice():
     assert as_tensor(slice(1, 2, 3)) == slice(1, 2, 3)
-
-    def assert_slice_equal(s1, s2):
-        for attr in ["start", "stop", "step"]:
-            a1 = getattr(s1, attr)
-            a2 = getattr(s2, attr)
-            if a1 is None or a2 is None:
-                assert a1 is None and a2 is None, f"slice.{attr} mismatch: {a1} vs {a2}"
-            elif isinstance(a1, TensorVariable) and isinstance(a2, TensorVariable):
-                assert_graph_equal(a1, a2)
-            else:
-                assert a1 == a2, f"slice.{attr} mismatch: {a1} vs {a2}"
 
     dtypes = {x: "int32", y: "int32"}
     cache = {}
