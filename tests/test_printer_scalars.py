@@ -1,5 +1,3 @@
-"""Scalar symbols, dtypes, broadcasting, elementwise ops, and Piecewise."""
-
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -7,10 +5,14 @@ import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor.variable import TensorVariable
+
 import sympy as sp
-from sympy.core.singleton import S
 from sympy.abc import x, y, z
+from sympy.core.singleton import S
+from sympy.functions.elementary.complexes import conjugate
+
 from sympytensor.pytensor import PytensorPrinter, as_tensor
+
 from tests.helpers import X, Y, Z, assert_graph_equal, f_t, fgraph_of, get_pt_vars, pytensor_simplify, xt
 
 
@@ -207,7 +209,7 @@ def test_no_broadcastable_deprecation_warning(recwarn):
     assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
 
 
-cases = [
+broadcasting_cases = [
     [(), (), ()],
     [(False,), (False,), (False,)],
     [(True,), (False,), (False,)],
@@ -216,7 +218,7 @@ cases = [
 ]
 
 
-@pytest.mark.parametrize("bc1, bc2, bc3", cases)
+@pytest.mark.parametrize("bc1, bc2, bc3", broadcasting_cases)
 def test_broadcasting(bc1, bc2, bc3):
     expr = x + y
     comp = as_tensor(expr, broadcastables={x: bc1, y: bc2})
@@ -298,8 +300,6 @@ def test_relational(sp_rel, pt_rel_fn):
 
 
 def test_complex_number_operations():
-    from sympy.functions.elementary.complexes import conjugate
-
     dtypes = {x: "complex128", y: "complex128"}
 
     cache = {}

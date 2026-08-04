@@ -1,24 +1,25 @@
-"""Printer cache identity and reuse."""
-
 import pytensor
 import pytensor.tensor as pt
 import pytest
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import ancestors
+
 import sympy as sp
 from sympy.abc import x, y, z
-from sympytensor.pytensor import as_tensor
+
+from sympytensor.pytensor import as_tensor, global_cache
+
 from tests.helpers import X, assert_graph_equal, f_t, get_pt_vars
 
 
-pairs = [
+equivalent_symbol_pairs = [
     (x, sp.Symbol("x")),
     (X, sp.MatrixSymbol("X", *X.shape)),
     (f_t, sp.Function("f")(sp.Symbol("t"))),
 ]
 
 
-@pytest.mark.parametrize("s1, s2", pairs)
+@pytest.mark.parametrize("s1, s2", equivalent_symbol_pairs)
 def test_cache_basic(s1, s2):
     cache = {}
     st = as_tensor(s1, cache=cache)
@@ -29,8 +30,6 @@ def test_cache_basic(s1, s2):
 
 
 def test_global_cache():
-    from sympytensor.pytensor import global_cache
-
     backup = dict(global_cache)
     try:
         global_cache.clear()

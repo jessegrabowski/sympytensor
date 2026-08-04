@@ -1,12 +1,15 @@
-"""The pytensor_function entry point and its dim/broadcastable handling."""
-
 import re
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
+from pytensor.compile import Function
+
 import sympy as sp
 from sympy.abc import x, y, z
+
 from sympytensor.pytensor import dim_handling, pytensor_function
+
 from tests.helpers import X, Y
 
 
@@ -71,7 +74,7 @@ def test_addition_pytensor_kwargs_in_function_printer(kwargs, test_inputs, expec
     assert np.linalg.norm(f(*test_inputs) - expected_result) < 1e-9
 
 
-scalar_cases = [
+function_dim_cases = [
     ([x, y], [x + y], None, [0]),  # Single 0d output
     ([X, Y], [X + Y], None, [2]),  # Single 2d output
     ([x, y], [x + y], {x: 0, y: 1}, [1]),  # Single 1d output
@@ -82,12 +85,10 @@ scalar_cases = [
 
 @pytest.mark.parametrize(
     "inputs, outputs, in_dims, out_dims",
-    scalar_cases,
+    function_dim_cases,
     ids=["single 0d", "single 2d", "single 1d", "two 0d", "mixed"],
 )
 def test_printing_scalar_function(inputs, outputs, in_dims, out_dims):
-    from pytensor.compile import Function
-
     f = pytensor_function(inputs, outputs, dims=in_dims)
 
     assert isinstance(f, Function)

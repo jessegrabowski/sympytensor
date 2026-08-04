@@ -1,11 +1,12 @@
-"""Sparse matrix printing and the CSR conversion helper."""
-
 import numpy as np
 import pytensor
 from numpy.testing import assert_allclose
 from scipy import sparse
+
 import sympy as sp
+
 from sympytensor.pytensor import as_tensor, dod_to_csr
+
 from tests.helpers import get_pt_vars, sparse_allclose
 
 

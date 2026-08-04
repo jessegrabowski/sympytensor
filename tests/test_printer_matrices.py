@@ -1,17 +1,18 @@
-"""Matrix symbols, matrix expressions, slices, and dense-matrix printing."""
-
 import numpy as np
 import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import equal_computations
 from pytensor.scalar.basic import ScalarType
-from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.subtensor import AdvancedIncSubtensor
 from pytensor.tensor.variable import TensorVariable
+
 import sympy as sp
 from sympy.abc import x, y
+
 from sympytensor.pytensor import as_tensor, pytensor_function
+
 from tests.helpers import X, Y, Z, assert_graph_equal, get_pt_vars
 
 
@@ -120,19 +121,17 @@ def test_BlockMatrix():
 
 
 def test_DenseMatrix():
-    from pytensor.tensor.subtensor import AdvancedIncSubtensor
-
-    t = sp.Symbol("theta")
+    theta = sp.Symbol("theta")
     for MatrixType in [sp.Matrix, sp.ImmutableMatrix]:
-        X = MatrixType([[sp.cos(t), -sp.sin(t)], [sp.sin(t), sp.cos(t)]])
+        X = MatrixType([[sp.cos(theta), -sp.sin(theta)], [sp.sin(theta), sp.cos(theta)]])
         cache = {}
         tX = as_tensor(X, cache=cache)
         assert isinstance(tX, TensorVariable)
         assert isinstance(tX.owner.op, AdvancedIncSubtensor)
 
-        t_pt = get_pt_vars(cache, ["theta"])
+        theta_pt = get_pt_vars(cache, ["theta"])
         theta_val = np.pi / 4
-        result = tX.eval({t_pt: theta_val})
+        result = tX.eval({theta_pt: theta_val})
         expected = np.array(
             [
                 [np.cos(theta_val), -np.sin(theta_val)],
@@ -149,8 +148,6 @@ def test_empty_matrix():
 
 
 def test_large_dense_matrix():
-    from pytensor.tensor.subtensor import AdvancedIncSubtensor
-
     vars = [sp.Symbol(f"x_{i}") for i in range(100)]
 
     eqs = sp.Matrix([x**2 for x in vars])

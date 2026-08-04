@@ -1,10 +1,11 @@
-"""IndexedBase/Idx printing and Sum/Product reductions."""
-
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
+
 import sympy as sp
+
 from sympytensor.pytensor import PytensorPrinter, as_tensor
+
 from tests.helpers import get_pt_vars
 
 
@@ -136,20 +137,20 @@ def test_print_reduce_2d(i_range: tuple, reduce_op):
 @pytest.mark.parametrize("reduce_op", [sp.Sum, sp.Product])
 def test_print_reduce_many_d(reduce_op):
     cache = {}
-    i, j, k, l = sp.symbols("i j k l", cls=sp.Idx)  # noqa: E741
+    i, j, k, m = sp.symbols("i j k m", cls=sp.Idx)
 
     x = sp.IndexedBase(
         "x",
-    )[i, j, k, l]
+    )[i, j, k, m]
     z = reduce_op(x, (i, 0, 1), (j, 0, 1), (k, 0, 1))
     z = as_tensor(z, cache=cache)
 
-    x_pt, l_pt = get_pt_vars(cache, ["x", "l"])
+    x_pt, m_pt = get_pt_vars(cache, ["x", "m"])
     x_val = np.linspace(1, 2, 16).reshape(2, 2, 2, 2)
     expected = x_val[:2, :2, :2, 0]
     expected = expected.sum(axis=(0, 1, 2)) if reduce_op == sp.Sum else np.prod(expected, axis=(0, 1, 2))
 
-    assert np.isclose(z.eval({x_pt: x_val, l_pt: 0}), expected)
+    assert np.isclose(z.eval({x_pt: x_val, m_pt: 0}), expected)
 
 
 def test_sum_with_mul_summand():

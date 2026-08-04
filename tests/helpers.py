@@ -1,23 +1,42 @@
-"""Shared helpers and symbol fixtures for the printer test suite."""
-
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.traversal import graph_inputs
 from scipy import sparse
+
 import sympy as sp
 from sympy.abc import t
+
 from sympytensor.pytensor import as_tensor
 
 
-xt, yt, zt = (pt.scalar(name, dtype="floatX") for name in "xyz")
+xt = pt.scalar("x", dtype="floatX")
 
+# Default set of matrix symbols for testing - make square so we can both
+# multiply and perform elementwise operations between them.
+X, Y, Z = (sp.MatrixSymbol(n, 4, 4) for n in "XYZ")
 
-Xt, Yt, Zt = (pt.tensor(n, dtype="floatX", shape=(None, None)) for n in "XYZ")
+# For testing AppliedUndef
+f_t = sp.Function("f")(t)
 
 
 def get_pt_vars(cache, names):
+    """Look up printed PyTensor variables in a printer cache by name.
+
+    Parameters
+    ----------
+    cache : dict
+        Printer cache populated by :func:`~sympytensor.pytensor.as_tensor`.
+    names : str or list of str
+        Variable name, or list of names, to retrieve.
+
+    Returns
+    -------
+    vars : TensorVariable or list of TensorVariable
+        The matching variable when a single name resolves, otherwise one variable per
+        requested name in the order given.
+    """
     if not isinstance(names, list):
         names = [names]
 
@@ -31,28 +50,19 @@ def get_pt_vars(cache, names):
     return out if len(out) > 1 else out[0]
 
 
-# Default set of matrix symbols for testing - make square so we can both
-# multiply and perform elementwise operations between them.
-X, Y, Z = (sp.MatrixSymbol(n, 4, 4) for n in "XYZ")
-
-
-# For testing AppliedUndef
-f_t = sp.Function("f")(t)
-
-
 def fgraph_of(*exprs):
-    """Transform SymPy expressions into Pytensor Computation.
+    """Convert SymPy expressions into a cloned PyTensor function graph.
 
     Parameters
     ----------
     exprs
-        SymPy expressions
+        SymPy expressions.
 
     Returns
     -------
-    pytensor.graph.fg.FunctionGraph
+    fgraph : pytensor.graph.fg.FunctionGraph
+        Graph over clones of the printed inputs and outputs.
     """
-
     outs = list(map(as_tensor, exprs))
     ins = list(graph_inputs(outs))
     ins, outs = pytensor.graph.basic.clone(ins, outs)
@@ -60,16 +70,6 @@ def fgraph_of(*exprs):
 
 
 def pytensor_simplify(fgraph):
-    """Simplify a Pytensor Computation.
-
-    Parameters
-    ----------
-    fgraph : pytensor.graph.fg.FunctionGraph
-
-    Returns
-    -------
-    pytensor.graph.fg.FunctionGraph
-    """
     mode = pytensor.compile.get_default_mode().excluding("fusion")
     fgraph = fgraph.clone()
     mode.optimizer.rewrite(fgraph)
@@ -88,14 +88,13 @@ def assert_graph_equal(actual, expected, in_actual=None, in_expected=None):
 
 
 def sparse_allclose(A, B, atol=1e-8):
-    if np.array_equal(A.shape, B.shape) == 0:
+    if not np.array_equal(A.shape, B.shape):
         return False
 
-    r1, c1, v1 = sparse.find(A)
-    r2, c2, v2 = sparse.find(B)
-    index_match = np.array_equal(r1, r2) & np.array_equal(c1, c2)
+    rows_A, cols_A, values_A = sparse.find(A)
+    rows_B, cols_B, values_B = sparse.find(B)
 
-    if index_match == 0:
+    if not (np.array_equal(rows_A, rows_B) and np.array_equal(cols_A, cols_B)):
         return False
-    else:
-        return np.allclose(v1, v2, atol=atol)
+
+    return np.allclose(values_A, values_B, atol=atol)
