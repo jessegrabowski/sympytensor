@@ -2,15 +2,15 @@ from collections.abc import Iterable
 from functools import partial, reduce
 from typing import Any
 
+import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import sympy as sp
+from pytensor import config
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
-from pytensor import config
-import numpy as np
 
 
 mapping = {
