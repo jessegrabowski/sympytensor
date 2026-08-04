@@ -1,0 +1,113 @@
+"""The pytensor_function entry point and its dim/broadcastable handling."""
+
+import re
+import numpy as np
+import pytest
+from numpy.testing import assert_allclose
+import sympy as sp
+from sympy.abc import x, y, z
+from sympytensor.pytensor import dim_handling, pytensor_function
+from tests.helpers import X, Y
+
+
+def test_pytensor_function_single_output():
+    f = pytensor_function([x, y], [x + y])
+    assert f(2, 3) == 5
+
+
+def test_pytensor_function_multiple_outputs():
+    f = pytensor_function([x, y], [x + y, x - y])
+    o1, o2 = f(2, 3)
+    assert o1 == 5
+    assert o2 == -1
+
+
+def test_pytensor_function_matches_numpy():
+    f = pytensor_function([x, y], [x + y], dim=1, dtypes={x: "float64", y: "float64"})
+    assert np.linalg.norm(f([1, 2], [3, 4]) - np.asarray([4, 6])) < 1e-9
+
+    f = pytensor_function([x, y], [x + y], dtypes={x: "float64", y: "float64"}, dim=1)
+    xx = np.arange(3).astype("float64")
+    yy = 2 * np.arange(3).astype("float64")
+    assert np.linalg.norm(f(xx, yy) - 3 * np.arange(3)) < 1e-9
+
+
+@pytest.mark.parametrize("n_out", [1, 2])
+def test_pytensor_matrix_function_matches_numpy(n_out):
+    m = sp.Matrix([[x, y], [z, x + y + z]])
+    expected = np.array([[1.0, 2.0], [3.0, 1.0 + 2.0 + 3.0]])
+
+    f = pytensor_function([x, y, z], [m] * n_out)
+    output = f(1.0, 2.0, 3.0)
+    if n_out == 1:
+        output = np.expand_dims(output, 0)
+    for out in output:
+        assert_allclose(out, expected)
+
+
+def test_dim_handling():
+    assert dim_handling([x], dim=2) == {x: (False, False)}
+    assert dim_handling([x, y], dims={x: 1, y: 2}) == {x: (False, True), y: (False, False)}
+    assert dim_handling([x], broadcastables={x: (False,)}) == {x: (False,)}
+
+
+@pytest.mark.parametrize(
+    "kwargs, test_inputs, expected_result",
+    [
+        (
+            dict(dim=1, on_unused_input="ignore", dtypes={x: "float64", y: "float64", z: "float64"}),
+            ([1, 2], [3, 4], [0, 0]),
+            (np.asarray([4, 6])),
+        ),
+        (
+            dict(dtypes={x: "float64", y: "float64", z: "float64"}, dim=1, on_unused_input="ignore"),
+            ([np.arange(3), 2 * np.arange(3), 2 * np.arange(3)]),
+            (3 * np.arange(3)),
+        ),
+    ],
+)
+def test_addition_pytensor_kwargs_in_function_printer(kwargs, test_inputs, expected_result):
+    f = pytensor_function([x, y, z], [x + y], **kwargs)
+    assert np.linalg.norm(f(*test_inputs) - expected_result) < 1e-9
+
+
+scalar_cases = [
+    ([x, y], [x + y], None, [0]),  # Single 0d output
+    ([X, Y], [X + Y], None, [2]),  # Single 2d output
+    ([x, y], [x + y], {x: 0, y: 1}, [1]),  # Single 1d output
+    ([x, y], [x + y, x - y], None, [0, 0]),  # Two 0d outputs
+    ([x, y, X, Y], [x + y, X + Y], None, [0, 2]),  # One 0d output, one 2d
+]
+
+
+@pytest.mark.parametrize(
+    "inputs, outputs, in_dims, out_dims",
+    scalar_cases,
+    ids=["single 0d", "single 2d", "single 1d", "two 0d", "mixed"],
+)
+def test_printing_scalar_function(inputs, outputs, in_dims, out_dims):
+    from pytensor.compile import Function
+
+    f = pytensor_function(inputs, outputs, dims=in_dims)
+
+    assert isinstance(f, Function)
+
+    in_values = [np.ones(tuple(d if d is not None else 5 for d in i.type.shape)) for i in f.input_storage]
+    out_values = f(*in_values)
+    if not isinstance(out_values, list):
+        out_values = [out_values]
+
+    assert len(out_dims) == len(out_values)
+    for d, value in zip(out_dims, out_values):
+        assert isinstance(value, np.ndarray)
+        assert value.ndim == d
+
+
+def test_pytensor_function_raises_on_bad_kwarg():
+    with pytest.raises(TypeError, match=re.escape("function() got an unexpected keyword argument")):
+        pytensor_function([x], [x + 1], foobar=3)
+
+
+def test_constant_functions():
+    tf = pytensor_function([], [1 + 1j])
+    assert tf() == 1 + 1j
