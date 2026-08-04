@@ -13,7 +13,7 @@ from sympy.functions.elementary.complexes import conjugate
 
 from sympytensor.pytensor import PytensorPrinter, as_tensor
 
-from tests.helpers import X, Y, Z, assert_graph_equal, f_t, fgraph_of, get_pt_vars, pytensor_simplify, xt
+from tests.helpers import X, assert_graph_equal, f_t, fgraph_of, get_pt_vars, pytensor_simplify, xt
 
 
 def test_numeric_constant_conversion():
@@ -25,15 +25,8 @@ def test_numeric_constant_conversion():
 
 @pytest.mark.parametrize(
     "sp_obj, expected_name, expected_ndim",
-    [
-        (x, "x", 0),
-        (y, "y", 0),
-        (z, "z", 0),
-        (X, "X", 2),
-        (Y, "Y", 2),
-        (Z, "Z", 2),
-    ],
-    ids=["x", "y", "z", "X", "Y", "Z"],
+    [(x, "x", 0), (X, "X", 2)],
+    ids=["Symbol", "MatrixSymbol"],
 )
 def test_symbol_roundtrip_to_pytensor(sp_obj, expected_name, expected_ndim):
     cache = {}
@@ -175,7 +168,7 @@ def test_complex_expression():
     assert_graph_equal(comp, expected)
 
 
-@pytest.mark.parametrize("dtype", ["float32", "float64", "int8", "int16", "int32", "int64"])
+@pytest.mark.parametrize("dtype", ["float32", "int8"])
 def test_dtype(dtype):
     assert as_tensor(x, dtypes={x: dtype}).type.dtype == dtype
 

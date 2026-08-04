@@ -30,16 +30,14 @@ def test_cache_basic(s1, s2):
 
 
 def test_global_cache():
-    backup = dict(global_cache)
-    try:
-        global_cache.clear()
+    # The _isolate_global_cache fixture in conftest.py restores the cache afterwards.
+    global_cache.clear()
 
-        for s in [x, X, f_t]:
-            st = as_tensor(s)
-            assert as_tensor(s) is st
+    for s in [x, X, f_t]:
+        st = as_tensor(s)
+        assert as_tensor(s) is st
 
-    finally:
-        global_cache.update(backup)
+    assert len(global_cache) == 3
 
 
 def test_cache_types_distinct():
