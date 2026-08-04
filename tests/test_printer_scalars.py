@@ -126,6 +126,18 @@ def test_binary_mapping(f_sp, f_pt):
 
 
 @pytest.mark.parametrize(
+    "f_sp, expected",
+    [(sp.Max, 5.0), (sp.Min, -1.0)],
+    ids=["Max", "Min"],
+)
+def test_Max_Min_variadic(f_sp, expected):
+    cache = {}
+    result = as_tensor(f_sp(x, y, z), cache=cache)
+    x_pt, y_pt, z_pt = get_pt_vars(cache, ["x", "y", "z"])
+    assert_allclose(result.eval({x_pt: 2.0, y_pt: 5.0, z_pt: -1.0}), expected)
+
+
+@pytest.mark.parametrize(
     "f_sp, f_pt",
     [
         (sp.re, pt.real),
