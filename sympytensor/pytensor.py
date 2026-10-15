@@ -263,6 +263,7 @@ class PytensorPrinter(Printer):
         self._frozen_context: tuple[frozenset, frozenset] | None = (frozenset(), frozenset())
 
         self._numeric: dict[sp.Basic, bool] = {}
+        self._indices: dict[sp.Basic, frozenset[str]] = {}
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
@@ -304,6 +305,18 @@ class PytensorPrinter(Printer):
             cached = self._numeric[expr] = all(self._is_number(arg) for arg in expr.args)
         return cached
 
+    def _index_names(self, expr: sp.Basic) -> frozenset[str]:
+        """Memoized names of the :class:`~sympy.tensor.indexed.Idx` objects in `expr`."""
+        if isinstance(expr, sp.Idx):
+            return frozenset((expr.name,))
+        if expr.is_Atom:
+            return frozenset()
+
+        cached = self._indices.get(expr)
+        if cached is None:
+            cached = self._indices[expr] = frozenset().union(*(self._index_names(arg) for arg in expr.args))
+        return cached
+
     def _memo_key(self, expr: sp.Basic, kwargs: dict[str, Any]) -> tuple | None:
         """Key `expr` by the kwargs that can change how it prints, or return ``None`` if they are unhashable."""
         if self._frozen_context is None:
@@ -313,6 +326,11 @@ class PytensorPrinter(Printer):
         try:
             for name, value in kwargs.items():
                 if value is self._context.get(name, _MISSING):
+                    continue
+
+                # Only `_print_Idx` reads the summation index arrays, so a subexpression free of those indices
+                # prints the same inside a reduction as outside it.
+                if name == "_sum_idx_arrays" and self._index_names(expr).isdisjoint(value):
                     continue
 
                 extras.append((name, frozenset(value.items()) if isinstance(value, dict) else value))
