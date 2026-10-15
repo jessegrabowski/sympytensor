@@ -1,6 +1,5 @@
 from collections.abc import Iterable
 from functools import partial, reduce
-from operator import itemgetter
 from typing import Any
 
 import numpy as np
@@ -240,8 +239,9 @@ class PytensorPrinter(Printer):
     Notes
     -----
     The printer converts each distinct subexpression once and returns the same PyTensor variable wherever it
-    recurs, across every :meth:`doprint` call on the instance. This assumes no entry of :attr:`cache` is replaced
-    while the printer is in use.
+    recurs, across consecutive :meth:`doprint` calls that pass equal `dtypes` and `broadcastables`. A call with
+    different ones discards the memoized results. This assumes no entry of :attr:`cache` is replaced while the
+    printer is in use.
     """
 
     printmethod = "_pytensor"
@@ -251,13 +251,17 @@ class PytensorPrinter(Printer):
         self.cache = global_cache if cache is None else cache
 
         # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
-        # positionally and whose size is part of the public contract.
+        # positionally and whose size is part of the public contract. `_printed` already dedupes guards within
+        # one context, so this keeps a single guard per index across contexts and when memoization is off.
         self._range_checks = {}
 
         # Without this memo a subexpression that recurs, as inlined definitions do, is printed once per
-        # occurrence. It lives apart from `cache` for the same reason as `_range_checks`.
+        # occurrence. It lives apart from `cache` for the same reason as `_range_checks`. Its keys leave out
+        # the `doprint` maps in `_context`, so it is cleared whenever their contents change.
         self._printed: dict[tuple, Any] = {}
-        self._frozen_kwargs: dict[int, tuple[dict, frozenset | dict]] = {}
+        self._context: dict[str, dict] = {}
+        self._frozen_context: tuple[frozenset, frozenset] | None = (frozenset(), frozenset())
+
         self._numeric: dict[sp.Basic, bool] = {}
         super().__init__(*args, **kwargs)
 
@@ -274,14 +278,11 @@ class PytensorPrinter(Printer):
         if expr.is_Atom:
             return self._print_unmemoized(expr, **kwargs)
 
-        key = (expr, self._kwargs_key(kwargs))
-        try:
-            result = self._printed.get(key, _MISSING)
-        except TypeError:
-            # A kwarg holds an unhashable value, such as a list in `broadcastables`, possibly for a symbol the
-            # expression never uses. Skipping the memo keeps such an expression printable.
+        key = self._memo_key(expr, kwargs)
+        if key is None:
             return self._print_unmemoized(expr, **kwargs)
 
+        result = self._printed.get(key, _MISSING)
         if result is _MISSING:
             result = self._printed[key] = self._print_unmemoized(expr, **kwargs)
         return result
@@ -303,26 +304,21 @@ class PytensorPrinter(Printer):
             cached = self._numeric[expr] = all(self._is_number(arg) for arg in expr.args)
         return cached
 
-    def _kwargs_key(self, kwargs: dict[str, Any]) -> tuple:
-        """Build the hashable part of a memo key from printing kwargs, keying mappings by their contents."""
-        return tuple((name, self._freeze(value)) for name, value in sorted(kwargs.items(), key=itemgetter(0)))
+    def _memo_key(self, expr: sp.Basic, kwargs: dict[str, Any]) -> tuple | None:
+        """Key `expr` by the kwargs that can change how it prints, or return ``None`` if they are unhashable."""
+        if self._frozen_context is None:
+            return None
 
-    def _freeze(self, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
+        extras = []
+        try:
+            for name, value in kwargs.items():
+                if value is self._context.get(name, _MISSING):
+                    continue
 
-        # Keyed by identity so each mapping is frozen once per `doprint` call. The entry holds the mapping
-        # itself, so its id cannot be reused by another object while the entry exists.
-        entry = self._frozen_kwargs.get(id(value))
-        if entry is None or entry[0] is not value:
-            try:
-                frozen = frozenset(value.items())
-            except TypeError:
-                # Left as the unhashable mapping, so the memo lookup in `_print` fails fast at every node
-                # instead of retrying the freeze.
-                frozen = value
-            entry = self._frozen_kwargs[id(value)] = (value, frozen)
-        return entry[1]
+                extras.append((name, frozenset(value.items()) if isinstance(value, dict) else value))
+            return expr, frozenset(extras)
+        except TypeError:
+            return None
 
     def _get_key(
         self,
@@ -751,8 +747,18 @@ class PytensorPrinter(Printer):
         if broadcastables is None:
             broadcastables = {}
 
-        # A caller may mutate a mapping between calls, so its frozen contents are recomputed on each one.
-        self._frozen_kwargs.clear()
+        # A list in `broadcastables`, possibly for a symbol the expression never uses, makes the maps unhashable.
+        # Memoization is then off for the call so the expression stays printable.
+        try:
+            frozen_context = (frozenset(dtypes.items()), frozenset(broadcastables.items()))
+        except TypeError:
+            frozen_context = None
+
+        if frozen_context is None or frozen_context != self._frozen_context:
+            self._printed.clear()
+        self._frozen_context = frozen_context
+        self._context = {"dtypes": dtypes, "broadcastables": broadcastables}
+
         return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
 
 
