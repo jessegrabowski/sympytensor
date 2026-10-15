@@ -214,6 +214,17 @@ def test_sum_with_mul_summand():
     assert np.isclose(z.eval({x_pt: x_val, a_pt: 2.0}), 2.0 * x_val.sum())
 
 
+def test_sum_shares_index_free_subexpression_with_enclosing_expression():
+    i = sp.Idx("i")
+    x = sp.IndexedBase("x")[i]
+    a, b = sp.symbols("a b")
+    shared = sp.sin(a + b)
+
+    z = as_tensor(sp.Sum(shared * x, (i, 0, 5)) + shared, cache={})
+
+    assert sum(var.owner is not None and var.owner.op == pt.sin for var in ancestors([z])) == 1
+
+
 def test_sum_with_add_summand():
     cache = {}
     i = sp.Idx("i")

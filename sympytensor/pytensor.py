@@ -221,6 +221,9 @@ def _matrix_dtype(
     return np.result_type(*dtypes).name
 
 
+_MISSING = object()
+
+
 class PytensorPrinter(Printer):
     """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
@@ -232,6 +235,13 @@ class PytensorPrinter(Printer):
         copied on initialization of the printer and will be updated in-place, so using the same dict object when
         creating multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means
         the cache is shared between all these applications.
+
+    Notes
+    -----
+    The printer converts each distinct subexpression once and returns the same PyTensor variable wherever it
+    recurs, across consecutive :meth:`doprint` calls that pass equal `dtypes` and `broadcastables`. A call with
+    different ones discards the memoized results. This assumes no entry of :attr:`cache` is replaced while the
+    printer is in use.
     """
 
     printmethod = "_pytensor"
@@ -241,21 +251,92 @@ class PytensorPrinter(Printer):
         self.cache = global_cache if cache is None else cache
 
         # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
-        # positionally and whose size is part of the public contract.
+        # positionally and whose size is part of the public contract. `_printed` already dedupes guards within
+        # one context, so this keeps a single guard per index across contexts and when memoization is off.
         self._range_checks = {}
+
+        # Without this memo a subexpression that recurs, as inlined definitions do, is printed once per
+        # occurrence. It lives apart from `cache` for the same reason as `_range_checks`. Its keys leave out
+        # the `doprint` maps in `_context`, so it is cleared whenever their contents change.
+        self._printed: dict[tuple, Any] = {}
+        self._context: dict[str, dict] = {}
+        self._frozen_context: tuple[frozenset, frozenset] | None = (frozenset(), frozenset())
+
+        self._numeric: dict[sp.Basic, bool] = {}
+        self._indices: dict[sp.Basic, frozenset[str]] = {}
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
-        """Override base _print to add fast path for numeric types."""
+        """Print numeric expressions as Python scalars and memoize every non-atomic subexpression."""
         # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
         # dispatch can reach one.
         if isinstance(expr, sp.Integer):
             return expr.p
 
-        if isinstance(expr, sp.Basic) and expr.is_number and expr.is_real is not False:
-            return float(expr.evalf())
+        if not isinstance(expr, sp.Basic):
+            return super()._print(expr, **kwargs)
 
+        if expr.is_Atom:
+            return self._print_unmemoized(expr, **kwargs)
+
+        key = self._memo_key(expr, kwargs)
+        if key is None:
+            return self._print_unmemoized(expr, **kwargs)
+
+        result = self._printed.get(key, _MISSING)
+        if result is _MISSING:
+            result = self._printed[key] = self._print_unmemoized(expr, **kwargs)
+        return result
+
+    def _print_unmemoized(self, expr: sp.Basic, **kwargs) -> Any:
+        if self._is_number(expr) and expr.is_real is not False:
+            return float(expr.evalf())
         return super()._print(expr, **kwargs)
+
+    def _is_number(self, expr: sp.Basic) -> bool:
+        """Memoized ``expr.is_number``."""
+        # SymPy's generic `Expr.is_number` is uncached and walks the subtree on every call, so asking it at each
+        # node of a deep expression is quadratic in depth. Classes that override it keep their own answer.
+        if expr.is_Atom or type(expr).is_number is not sp.Expr.is_number:
+            return expr.is_number
+
+        cached = self._numeric.get(expr)
+        if cached is None:
+            cached = self._numeric[expr] = all(self._is_number(arg) for arg in expr.args)
+        return cached
+
+    def _index_names(self, expr: sp.Basic) -> frozenset[str]:
+        """Memoized names of the :class:`~sympy.tensor.indexed.Idx` objects in `expr`."""
+        if isinstance(expr, sp.Idx):
+            return frozenset((expr.name,))
+        if expr.is_Atom:
+            return frozenset()
+
+        cached = self._indices.get(expr)
+        if cached is None:
+            cached = self._indices[expr] = frozenset().union(*(self._index_names(arg) for arg in expr.args))
+        return cached
+
+    def _memo_key(self, expr: sp.Basic, kwargs: dict[str, Any]) -> tuple | None:
+        """Key `expr` by the kwargs that can change how it prints, or return ``None`` if they are unhashable."""
+        if self._frozen_context is None:
+            return None
+
+        extras = []
+        try:
+            for name, value in kwargs.items():
+                if value is self._context.get(name, _MISSING):
+                    continue
+
+                # Only `_print_Idx` reads the summation index arrays, so a subexpression free of those indices
+                # prints the same inside a reduction as outside it.
+                if name == "_sum_idx_arrays" and self._index_names(expr).isdisjoint(value):
+                    continue
+
+                extras.append((name, frozenset(value.items()) if isinstance(value, dict) else value))
+            return expr, frozenset(extras)
+        except TypeError:
+            return None
 
     def _get_key(
         self,
@@ -684,6 +765,18 @@ class PytensorPrinter(Printer):
         if broadcastables is None:
             broadcastables = {}
 
+        # A list in `broadcastables`, possibly for a symbol the expression never uses, makes the maps unhashable.
+        # Memoization is then off for the call so the expression stays printable.
+        try:
+            frozen_context = (frozenset(dtypes.items()), frozenset(broadcastables.items()))
+        except TypeError:
+            frozen_context = None
+
+        if frozen_context is None or frozen_context != self._frozen_context:
+            self._printed.clear()
+        self._frozen_context = frozen_context
+        self._context = {"dtypes": dtypes, "broadcastables": broadcastables}
+
         return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
 
 
@@ -775,7 +868,7 @@ def pytensor_function(
 ) -> "pytensor.compile.executor.Function":
     """Create a compiled PyTensor function from SymPy expressions.
 
-    The inputs and outputs are converted to PyTensor variables using :func:`as_tensor` and then passed to
+    The inputs and outputs are converted to PyTensor variables by a single :class:`PytensorPrinter` and then passed to
     :func:`pytensor.function`.
 
     Parameters
@@ -823,7 +916,9 @@ def pytensor_function(
         broadcastables=broadcastables,
     )
 
-    code = partial(as_tensor, cache=cache, dtypes=dtypes, broadcastables=broadcastables)
+    # One printer for every expression, so subexpressions shared between outputs are printed once.
+    printer = PytensorPrinter(cache=cache, settings={})
+    code = partial(printer.doprint, dtypes=dtypes, broadcastables=broadcastables)
     tinputs = list(map(code, inputs))
     toutputs = list(map(code, outputs))
 
