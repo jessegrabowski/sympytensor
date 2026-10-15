@@ -7,7 +7,7 @@ import sympy as sp
 from pytensor.graph.replace import graph_replace
 from pytensor.tensor import TensorVariable
 
-from sympytensor.pytensor import as_tensor
+from sympytensor.pytensor import PytensorPrinter
 
 if TYPE_CHECKING:
     from pymc.model import Model
@@ -182,11 +182,12 @@ def SympyDeterministic(
 
     model = pm.modelcontext(model)
     cache = {}
+    printer = PytensorPrinter(cache=cache, settings={})
 
     if isinstance(expr, list):
-        pytensor_expr = pytensor.tensor.stack([as_tensor(e, cache=cache) for e in expr])
+        pytensor_expr = pytensor.tensor.stack([printer.doprint(e) for e in expr])
     else:
-        pytensor_expr = as_tensor(expr, cache=cache)
+        pytensor_expr = printer.doprint(expr)
 
     pytensor_expr = pytensor.tensor.as_tensor_variable(pytensor_expr)
 

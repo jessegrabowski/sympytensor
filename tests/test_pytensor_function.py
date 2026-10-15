@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.compile import Function
+from pytensor.compile.mode import Mode
 
 import sympy as sp
 from sympy.abc import x, y, z
@@ -127,3 +128,9 @@ def test_pytensor_function_raises_on_bad_kwarg():
 def test_constant_functions():
     tf = pytensor_function([], [1 + 1j])
     assert tf() == 1 + 1j
+
+
+def test_pytensor_function_prints_subexpression_shared_by_outputs_once():
+    f = pytensor_function([x, y], [sp.sin(x + y), sp.cos(x + y)], mode=Mode(linker="py", optimizer=None))
+
+    assert len(f.maker.fgraph.apply_nodes) == 3

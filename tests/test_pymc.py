@@ -2,6 +2,7 @@ import ast
 
 import pymc as pm
 import pytensor.tensor as pt
+from pytensor.graph.traversal import applys_between, graph_inputs
 import pytest
 import sympy as sp
 from numpy.testing import assert_allclose
@@ -51,6 +52,18 @@ def test_make_sympy_deterministic_simple():
         y_pm = SympyDeterministic("y", y_sp)
 
     assert_allclose(*pm.draw([y_pm, x_pm + 1], 10))
+
+
+def test_sympy_deterministic_list_prints_shared_subexpression_once():
+    x_sp, y_sp = sp.symbols("x y")
+
+    with pm.Model():
+        pm.Normal("x")
+        pm.Normal("y")
+        stacked = SympyDeterministic("stacked", [sp.sin(x_sp + y_sp), sp.cos(x_sp + y_sp)])
+
+    nodes = applys_between(list(graph_inputs([stacked])), [stacked])
+    assert sum(node.op == pt.add for node in nodes) == 1
 
 
 def test_make_sympy_deterministic_raises_if_missing_inputs():

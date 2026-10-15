@@ -844,7 +844,7 @@ def pytensor_function(
 ) -> "pytensor.compile.executor.Function":
     """Create a compiled PyTensor function from SymPy expressions.
 
-    The inputs and outputs are converted to PyTensor variables using :func:`as_tensor` and then passed to
+    The inputs and outputs are converted to PyTensor variables by a single :class:`PytensorPrinter` and then passed to
     :func:`pytensor.function`.
 
     Parameters
@@ -892,7 +892,9 @@ def pytensor_function(
         broadcastables=broadcastables,
     )
 
-    code = partial(as_tensor, cache=cache, dtypes=dtypes, broadcastables=broadcastables)
+    # One printer for every expression, so subexpressions shared between outputs are printed once.
+    printer = PytensorPrinter(cache=cache, settings={})
+    code = partial(printer.doprint, dtypes=dtypes, broadcastables=broadcastables)
     tinputs = list(map(code, inputs))
     toutputs = list(map(code, outputs))
 
