@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from functools import partial, reduce
+from operator import itemgetter
 from typing import Any
 
 import numpy as np
@@ -221,6 +222,9 @@ def _matrix_dtype(
     return np.result_type(*dtypes).name
 
 
+_MISSING = object()
+
+
 class PytensorPrinter(Printer):
     """Code printer that converts SymPy expressions into PyTensor symbolic expression graphs.
 
@@ -232,6 +236,12 @@ class PytensorPrinter(Printer):
         copied on initialization of the printer and will be updated in-place, so using the same dict object when
         creating multiple printers or making multiple calls to :func:`as_tensor` or :func:`pytensor_function` means
         the cache is shared between all these applications.
+
+    Notes
+    -----
+    The printer converts each distinct subexpression once and returns the same PyTensor variable wherever it
+    recurs, across every :meth:`doprint` call on the instance. This assumes no entry of :attr:`cache` is replaced
+    while the printer is in use.
     """
 
     printmethod = "_pytensor"
@@ -243,19 +253,76 @@ class PytensorPrinter(Printer):
         # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
         # positionally and whose size is part of the public contract.
         self._range_checks = {}
+
+        # Without this memo a subexpression that recurs, as inlined definitions do, is printed once per
+        # occurrence. It lives apart from `cache` for the same reason as `_range_checks`.
+        self._printed: dict[tuple, Any] = {}
+        self._frozen_kwargs: dict[int, tuple[dict, frozenset | dict]] = {}
+        self._numeric: dict[sp.Basic, bool] = {}
         super().__init__(*args, **kwargs)
 
     def _print(self, expr, **kwargs):
-        """Override base _print to add fast path for numeric types."""
+        """Print numeric expressions as Python scalars and memoize every non-atomic subexpression."""
         # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
         # dispatch can reach one.
         if isinstance(expr, sp.Integer):
             return expr.p
 
-        if isinstance(expr, sp.Basic) and expr.is_number and expr.is_real is not False:
-            return float(expr.evalf())
+        if not isinstance(expr, sp.Basic):
+            return super()._print(expr, **kwargs)
 
+        if expr.is_Atom:
+            return self._print_unmemoized(expr, **kwargs)
+
+        key = (expr, self._kwargs_key(kwargs))
+        try:
+            result = self._printed.get(key, _MISSING)
+        except TypeError:
+            # A kwarg holds an unhashable value, such as a list in `broadcastables`, possibly for a symbol the
+            # expression never uses. Skipping the memo keeps such an expression printable.
+            return self._print_unmemoized(expr, **kwargs)
+
+        if result is _MISSING:
+            result = self._printed[key] = self._print_unmemoized(expr, **kwargs)
+        return result
+
+    def _print_unmemoized(self, expr: sp.Basic, **kwargs) -> Any:
+        if self._is_number(expr) and expr.is_real is not False:
+            return float(expr.evalf())
         return super()._print(expr, **kwargs)
+
+    def _is_number(self, expr: sp.Basic) -> bool:
+        """Memoized ``expr.is_number``."""
+        # SymPy's generic `Expr.is_number` is uncached and walks the subtree on every call, so asking it at each
+        # node of a deep expression is quadratic in depth. Classes that override it keep their own answer.
+        if expr.is_Atom or type(expr).is_number is not sp.Expr.is_number:
+            return expr.is_number
+
+        cached = self._numeric.get(expr)
+        if cached is None:
+            cached = self._numeric[expr] = all(self._is_number(arg) for arg in expr.args)
+        return cached
+
+    def _kwargs_key(self, kwargs: dict[str, Any]) -> tuple:
+        """Build the hashable part of a memo key from printing kwargs, keying mappings by their contents."""
+        return tuple((name, self._freeze(value)) for name, value in sorted(kwargs.items(), key=itemgetter(0)))
+
+    def _freeze(self, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        # Keyed by identity so each mapping is frozen once per `doprint` call. The entry holds the mapping
+        # itself, so its id cannot be reused by another object while the entry exists.
+        entry = self._frozen_kwargs.get(id(value))
+        if entry is None or entry[0] is not value:
+            try:
+                frozen = frozenset(value.items())
+            except TypeError:
+                # Left as the unhashable mapping, so the memo lookup in `_print` fails fast at every node
+                # instead of retrying the freeze.
+                frozen = value
+            entry = self._frozen_kwargs[id(value)] = (value, frozen)
+        return entry[1]
 
     def _get_key(
         self,
@@ -684,6 +751,8 @@ class PytensorPrinter(Printer):
         if broadcastables is None:
             broadcastables = {}
 
+        # A caller may mutate a mapping between calls, so its frozen contents are recomputed on each one.
+        self._frozen_kwargs.clear()
         return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
 
 

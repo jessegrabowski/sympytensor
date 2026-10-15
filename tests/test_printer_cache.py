@@ -2,7 +2,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.traversal import ancestors
+from pytensor.graph.traversal import ancestors, applys_between, graph_inputs
 
 import sympy as sp
 from sympy.abc import x, y, z
@@ -89,3 +89,58 @@ def test_cache_complex():
             seen.add(v.name)
 
     assert seen == symbol_names
+
+
+def test_recurring_subexpression_prints_once():
+    shared = x + y
+    out = as_tensor(sp.sin(shared) + sp.cos(shared), cache={})
+
+    first_arg, second_arg = (term.owner.inputs[0] for term in out.owner.inputs)
+
+    assert first_arg is second_arg
+
+
+def test_memo_spans_doprint_calls():
+    printer = PytensorPrinter(cache={}, settings={})
+
+    assert printer.doprint(x * y + z) is printer.doprint(x * y + z)
+
+
+def test_memo_distinguishes_dtypes_mutated_between_calls():
+    printer = PytensorPrinter(cache={}, settings={})
+    dtypes = {x: "float32"}
+
+    as_float32 = printer.doprint(x + y, dtypes=dtypes)
+    dtypes[x] = "int64"
+    as_int64 = printer.doprint(x + y, dtypes=dtypes)
+
+    assert as_float32 is not as_int64
+    assert "int64" in {inp.dtype for inp in as_int64.owner.inputs}
+    assert printer.doprint(x + y) is not as_float32
+
+
+def test_nested_substitution_prints_each_distinct_node_once():
+    alpha, beta, delta, sigma = sp.symbols("alpha beta delta sigma")
+    level = 1 / beta - 1 + delta
+    for _ in range(6):
+        level = alpha * level ** (alpha - 1) / (1 + level) + sp.log(level) * sigma - delta * level
+
+    distinct_nodes = set()
+    pending = [level]
+    while pending:
+        node = pending.pop()
+        if node.is_Atom or node in distinct_nodes:
+            continue
+        distinct_nodes.add(node)
+        pending.extend(node.args)
+
+    out = as_tensor(level, cache={})
+
+    assert len(list(applys_between(list(graph_inputs([out])), [out]))) == len(distinct_nodes)
+
+
+def test_unhashable_kwarg_for_absent_symbol_does_not_block_printing():
+    cache = {}
+    out = as_tensor(x + 1, cache=cache, broadcastables={y: [False]})
+
+    assert_graph_equal(out, as_tensor(x + 1, cache=cache))

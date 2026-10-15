@@ -4,6 +4,7 @@ import pytensor.tensor as pt
 import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.basic import equal_computations
+from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor.variable import TensorVariable
 
 import sympy as sp
@@ -67,6 +68,12 @@ def test_AppliedUndef():
     assert isinstance(ftt, TensorVariable)
     assert ftt.broadcastable == ()
     assert ftt.name == "f_t"
+
+
+def test_AppliedUndef_of_number_prints_as_variable():
+    out = as_tensor(sp.Function("f")(1) + 2, cache={})
+
+    assert "f_1" in {var.name for var in graph_inputs([out])}
 
 
 def test_add():
