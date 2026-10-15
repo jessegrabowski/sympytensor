@@ -227,3 +227,7 @@ $RECYCLE.BIN/
 
 # pixi
 .pixi/
+
+# coverage
+.coverage
+coverage.xml
