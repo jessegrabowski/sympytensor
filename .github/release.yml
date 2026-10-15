@@ -1,0 +1,26 @@
+# Mostly taken verbatim from https://github.com/pymc-devs/pymc/blob/main/.github/release.yml
+#
+# This file contains configuration for the automatic generation of release notes in GitHub.
+# Also see https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    labels:
+      - no releasenotes
+  categories:
+    - title: Major Changes 🛠
+      labels:
+        - major
+    - title: New Features 🎉
+      labels:
+        - enhancement
+        - feature request
+    - title: Bugfixes 🐛
+      labels:
+        - bug
+    - title: Documentation 📖
+      labels:
+        - docs
+        - documentation
+    - title: Maintenance 🔧
+      labels:
+        - "*"

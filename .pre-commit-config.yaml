@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v5.0.0
+  rev: v6.0.0
   hooks:
     -   id: check-merge-conflict
     -   id: check-toml
@@ -10,7 +10,7 @@ repos:
     -   id: trailing-whitespace
 
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.16.1
+  rev: v0.17.0
   hooks:
     - id: ruff-check
       args: [ --fix, --unsafe-fixes, --exit-non-zero-on-fix ]
@@ -23,3 +23,12 @@ repos:
     - id: no-print-statements
       files: ^sympytensor/
       exclude: ^sympytensor/_version\.py$
+
+- repo: local
+  hooks:
+    - id: pixi-lock-check
+      name: pixi lockfile is up to date
+      entry: pixi lock --check
+      language: system
+      files: ^(pyproject\.toml|pixi\.lock)$
+      pass_filenames: false
