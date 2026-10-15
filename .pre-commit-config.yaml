@@ -23,3 +23,12 @@ repos:
     - id: no-print-statements
       files: ^sympytensor/
       exclude: ^sympytensor/_version\.py$
+
+- repo: local
+  hooks:
+    - id: pixi-lock-check
+      name: pixi lockfile is up to date
+      entry: pixi lock --check
+      language: system
+      files: ^(pyproject\.toml|pixi\.lock)$
+      pass_filenames: false

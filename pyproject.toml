@@ -15,6 +15,7 @@ classifiers =[
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics"
 ]
@@ -58,6 +59,7 @@ allow-direct-references = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+testpaths = ["tests"]
 xfail_strict=true
 filterwarnings = ["error"]
 
@@ -76,3 +78,37 @@ max-complexity = 10
 # Every ``_print_*`` handler must accept the printer's dispatch signature, so the
 # ones that need no keyword arguments still declare ``**kwargs``.
 "sympytensor/pytensor.py" = ["ARG002"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64", "win-64"]
+
+[tool.pixi.dependencies]
+pytensor = ">=3.0.0,<4.0.0"
+sympy = ">=1.14.0"
+pymc = ">=6.0.0,<7.0.0"
+# conda-forge sympy does not carry the mpmath<1.4 cap from its PyPI metadata.
+mpmath = ">=1.1.0,<1.4.0"
+
+[tool.pixi.pypi-dependencies]
+sympytensor = { path = ".", editable = true }
+
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
+
+[tool.pixi.environments]
+default = { features = ["dev", "py312"] }
+py313 = { features = ["dev", "py313"] }
+py314 = { features = ["dev", "py314"] }
+
+[tool.pixi.tasks]
+test = "pytest"
+test-cov = "pytest -vv --cov=sympytensor --cov-report xml:coverage.xml --cov-report term"
+lint = "pre-commit run --all-files"
+fmt = "ruff format ."
