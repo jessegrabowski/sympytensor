@@ -250,9 +250,9 @@ class PytensorPrinter(Printer):
         cache = kwargs.pop("cache", None)
         self.cache = global_cache if cache is None else cache
 
-        # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
-        # positionally and whose size is part of the public contract. `_printed` already dedupes guards within
-        # one context, so this keeps a single guard per index across contexts and when memoization is off.
+        # Index range guards are memoized apart from `cache`, whose keys consumers read positionally and whose
+        # size is part of the public contract. `_printed` already dedupes guards within one context, so this keeps
+        # a single guard per index across contexts and when memoization is off.
         self._range_checks = {}
 
         # Without this memo a subexpression that recurs, as inlined definitions do, is printed once per
@@ -351,7 +351,8 @@ class PytensorPrinter(Printer):
 
         - It is derived from the object's *value*, never its identity.  Equal-but-distinct SymPy objects
           must share one cache entry, or a symbol printed twice becomes two PyTensor variables and
-          :func:`pytensor_function` rejects its own inputs as unused.
+          :func:`pytensor_function` rejects its own inputs as unused.  Unequal objects must not share one:
+          a :class:`~sympy.Dummy` differs from every other Dummy of the same name by its ``dummy_index``.
         - ``key[0]`` is the name: :mod:`sympytensor.pymc` matches cached variables to model variables on it.
 
         Nothing else may be stored in :attr:`cache` either -- several tests assert an exact ``len(cache)``,
@@ -371,12 +372,13 @@ class PytensorPrinter(Printer):
         Returns
         -------
         key : tuple
-            ``(name, type, args, dtype, shape)`` -- the name first, since that is what callers match on.
+            ``(name, type, args, dtype, shape, dummy_index)`` -- the name first, since that is what callers match
+            on.  ``dummy_index`` is ``None`` for anything but a :class:`~sympy.Dummy`.
         """
         if name is None:
             name = symbol.name
 
-        return name, type(symbol), symbol.args, dtype, shape
+        return name, type(symbol), symbol.args, dtype, shape, getattr(symbol, "dummy_index", None)
 
     def _get_or_create(
         self,

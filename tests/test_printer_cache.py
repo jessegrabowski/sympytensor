@@ -144,3 +144,13 @@ def test_unhashable_kwarg_for_absent_symbol_does_not_block_printing():
     out = as_tensor(x + 1, cache=cache, broadcastables={y: [False]})
 
     assert_graph_equal(out, as_tensor(x + 1, cache=cache))
+
+
+def test_distinct_dummies_with_one_name_print_as_distinct_variables():
+    first, second = sp.Dummy("d"), sp.Dummy("d")
+    cache = {}
+    difference = as_tensor(first - second, cache=cache)
+
+    # Merging the two Dummies into one variable makes the difference identically zero.
+    first_pt, second_pt = cache.values()
+    assert abs(difference.eval({first_pt: 3.0, second_pt: 1.0})) == 2.0
