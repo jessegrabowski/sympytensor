@@ -417,7 +417,7 @@ class PytensorPrinter(Printer):
         return self._get_or_create(symbol, dtype=dtype, shape=broadcastable)
 
     def _print_AppliedUndef(self, applied, **kwargs):
-        name = str(type(applied)) + "_" + str(applied.args[0])
+        name = "_".join([str(type(applied)), *map(str, applied.args)])
         dtype = kwargs.get("dtypes", {}).get(applied)
         broadcastable = kwargs.get("broadcastables", {}).get(applied)
         return self._get_or_create(applied, name=name, dtype=dtype, shape=broadcastable)

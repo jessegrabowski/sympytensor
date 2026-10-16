@@ -401,3 +401,10 @@ def test_integer_base_nonnegative_power_stays_integer():
     n = sp.Symbol("n")
     result = as_tensor(n**2, cache={}, dtypes={n: "int64"})
     assert result.dtype == "int64"
+
+
+def test_AppliedUndef_name_includes_every_argument():
+    f = sp.Function("f")
+    cache = {}
+    as_tensor(f(x, y) + f(x, z), cache=cache)
+    assert sorted(key[0] for key in cache) == ["f_x_y", "f_x_z"]
