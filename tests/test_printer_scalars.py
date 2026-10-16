@@ -379,7 +379,6 @@ def test_piecewise_single_true():
     cache = {}
     result = as_tensor(expr, cache=cache)
     x_pt = get_pt_vars(cache, "x")
-    # True is printed as 1 (an int), so switch(1, x**2, nan) — evaluates to x**2
     assert_allclose(result.eval({x_pt: 3.0}), 9.0)
 
 
@@ -408,3 +407,19 @@ def test_AppliedUndef_name_includes_every_argument():
     cache = {}
     as_tensor(f(x, y) + f(x, z), cache=cache)
     assert sorted(key[0] for key in cache) == ["f_x_y", "f_x_z"]
+
+
+def test_piecewise_without_fallback_is_nan_where_no_condition_holds():
+    expr = sp.Piecewise((x, x > 0), (-x, x < -1))
+    cache = {}
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_allclose([result.eval({x_pt: value}) for value in (2.0, -3.0, -0.5)], [2.0, 3.0, np.nan])
+
+
+def test_piecewise_false_condition_is_dropped():
+    expr = sp.Piecewise((y, sp.false), (x, x > 0), (0, True), evaluate=False)
+    cache = {}
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_graph_equal(result, pt.switch(x_pt > 0, x_pt, 0))

@@ -723,20 +723,15 @@ class PytensorPrinter(Printer):
         )
 
     def _print_Piecewise(self, expr, **kwargs):
-        e, cond = expr.args[0].args  # First condition and corresponding value
-
-        # Print conditional expression and value for first condition
-        p_cond = self._print(cond, **kwargs)
-        p_e = self._print(e, **kwargs)
-
-        # One condition only
-        if len(expr.args) == 1:
-            # Return value if condition else NaN
-            return pt.switch(p_cond, p_e, np.nan)
-
-        # Return value_1 if condition_1 else evaluate remaining conditions
-        p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
-        return pt.switch(p_cond, p_e, p_remaining)
+        # Built from the last piece outward: rebuilding a Piecewise from the remaining pieces at each level would
+        # re-run SymPy's canonicalization once per piece. NaN covers inputs that no condition matches.
+        result = np.nan
+        for value, condition in reversed(expr.args):
+            if condition is sp.true:
+                result = self._print(value, **kwargs)
+            elif condition is not sp.false:
+                result = pt.switch(self._print(condition, **kwargs), self._print(value, **kwargs), result)
+        return result
 
     def _print_factorial(self, expr, **kwargs):
         return self._print(sp.gamma(expr.args[0] + 1), **kwargs)
