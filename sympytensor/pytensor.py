@@ -52,10 +52,7 @@ mapping = {
     sp.StrictLessThan: pt.lt,
     sp.LessThan: pt.le,
     sp.GreaterThan: pt.ge,
-    sp.And: pt.bitwise_and,  # bitwise
-    sp.Or: pt.bitwise_or,  # bitwise
     sp.Not: pt.invert,  # bitwise
-    sp.Xor: pt.bitwise_xor,  # bitwise
     sp.conjugate: pt.conj,
     # Matrices
     sp.MatAdd: pt.add,
@@ -443,6 +440,15 @@ class PytensorPrinter(Printer):
         children into the op the way :meth:`_print_Basic` does would fail in ``make_node``.
         """
         return reduce(op, [self._print(arg, **kwargs) for arg in expr.args])
+
+    def _print_And(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_and, expr, **kwargs)
+
+    def _print_Or(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_or, expr, **kwargs)
+
+    def _print_Xor(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_xor, expr, **kwargs)
 
     def _print_Max(self, expr, **kwargs):
         return self._fold_binary(pt.maximum, expr, **kwargs)

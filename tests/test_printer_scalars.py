@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -168,6 +170,21 @@ def test_logical_not():
     result = as_tensor(sp.Not(p), cache=cache, dtypes={p: "bool"})
     p_pt = get_pt_vars(cache, "p")
     assert_graph_equal(result, pt.invert(p_pt))
+
+
+@pytest.mark.parametrize(
+    "f_sp, f_py",
+    [(sp.And, all), (sp.Or, any), (sp.Xor, lambda values: sum(values) % 2 == 1)],
+    ids=["And", "Or", "Xor"],
+)
+def test_logical_variadic(f_sp, f_py):
+    p, q, r = sp.symbols("p q r")
+    cache = {}
+    result = as_tensor(f_sp(p, q, r), cache=cache, dtypes={p: "bool", q: "bool", r: "bool"})
+    p_pt, q_pt, r_pt = get_pt_vars(cache, ["p", "q", "r"])
+
+    for values in itertools.product([False, True], repeat=3):
+        assert result.eval(dict(zip([p_pt, q_pt, r_pt], values, strict=True))) == f_py(values), values
 
 
 def test_logical_xor():
