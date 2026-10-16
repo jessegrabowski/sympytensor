@@ -340,10 +340,11 @@ def test_emptyPrinter_passthrough():
     assert printer.emptyPrinter(sentinel) is sentinel
 
 
-def test_large_integer():
-    big = sp.Integer(10**100)
-    result = as_tensor(big)
-    assert result == 10**100
+def test_integer_beyond_int64_prints_into_graph():
+    cache = {}
+    result = as_tensor(x + sp.Integer(10**100), cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_allclose(result.eval({x_pt: 1.0}), 1e100)
 
 
 def test_nested_piecewise():

@@ -66,6 +66,8 @@ mapping = {
     # sp.Inverse is handled by _print_Inverse; it subclasses sp.MatPow and must not reach this mapping.
 }
 
+_INT64_INFO = np.iinfo(np.int64)
+
 
 def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[list, list[int], list[int]]:
     """Convert a dictionary-of-dictionaries sparse representation to compressed sparse row (CSR).
@@ -271,7 +273,9 @@ class PytensorPrinter(Printer):
         # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
         # dispatch can reach one.
         if isinstance(expr, sp.Integer):
-            return expr.p
+            # PyTensor cannot hold an integer constant wider than int64. A plain float would be autocast to
+            # float32 first, which overflows for most such values.
+            return expr.p if _INT64_INFO.min <= expr.p <= _INT64_INFO.max else np.float64(expr.p)
 
         if not isinstance(expr, sp.Basic):
             return super()._print(expr, **kwargs)
