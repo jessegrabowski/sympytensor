@@ -369,3 +369,17 @@ def test_complex_dtype_propagation():
     cache = {}
     result = as_tensor(sp.sin(x), cache=cache, dtypes={x: "complex64"})
     assert result.type.dtype == "complex64"
+
+
+def test_integer_base_negative_power_is_reciprocal():
+    n = sp.Symbol("n")
+    cache = {}
+    result = as_tensor(1 / n, cache=cache, dtypes={n: "int64"})
+    n_pt = get_pt_vars(cache, "n")
+    assert_allclose(result.eval({n_pt: 4}), 0.25)
+
+
+def test_integer_base_nonnegative_power_stays_integer():
+    n = sp.Symbol("n")
+    result = as_tensor(n**2, cache={}, dtypes={n: "int64"})
+    assert result.dtype == "int64"

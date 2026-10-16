@@ -314,3 +314,13 @@ def test_apply_unused_index_factors(unused_names, op, expected):
     result = _apply_unused_index_factors(pt.as_tensor(3.0), sum_specs, unused_names, op)
 
     assert_allclose(result.eval(), expected)
+
+
+def test_sum_with_reciprocal_of_index():
+    cache = {}
+    i = sp.Idx("i")
+    a = sp.Symbol("a")
+    z = as_tensor(sp.Sum(a / i, (i, 1, 4)), cache=cache)
+
+    a_pt = get_pt_vars(cache, "a")
+    assert np.isclose(z.eval({a_pt: 1.0}), 1 + 1 / 2 + 1 / 3 + 1 / 4)

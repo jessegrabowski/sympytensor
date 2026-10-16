@@ -9,6 +9,7 @@ import sympy as sp
 from pytensor import config
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse.variable import SparseVariable
+from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
 
@@ -45,7 +46,6 @@ mapping = {
     sp.erf: pt.erf,
     sp.gamma: pt.gamma,
     sp.loggamma: pt.gammaln,
-    sp.Pow: pt.pow,
     sp.Eq: pt.eq,
     sp.Ne: pt.neq,
     sp.StrictGreaterThan: pt.gt,
@@ -445,6 +445,17 @@ class PytensorPrinter(Printer):
 
     def _print_Min(self, expr, **kwargs):
         return self._fold_binary(pt.minimum, expr, **kwargs)
+
+    def _print_Pow(self, expr, **kwargs):
+        base = pt.as_tensor_variable(self._print(expr.base, **kwargs))
+        exponent = pt.as_tensor_variable(self._print(expr.exp, **kwargs))
+
+        # Integer arithmetic truncates a negative power to zero, where SymPy means the reciprocal.
+        integer_operands = base.dtype in integer_dtypes and exponent.dtype in integer_dtypes
+        if integer_operands and not expr.exp.is_nonnegative:
+            base = pt.cast(base, config.floatX)
+
+        return pt.pow(base, exponent)
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
