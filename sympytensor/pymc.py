@@ -15,6 +15,16 @@ if TYPE_CHECKING:
 pm = None
 
 
+def _model_var(model: Model, name: str) -> TensorVariable | None:
+    """Look up a model variable by name, or return ``None`` if the model has none."""
+    # A variable named like a Model attribute (``name``, ``logp``) is never set as an attribute, so ``getattr``
+    # would return the attribute.
+    try:
+        return model[name]
+    except KeyError:
+        return None
+
+
 def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     """Match cached PyTensor variables to random variables in a PyMC model.
 
@@ -50,7 +60,7 @@ def _match_cache_to_rvs(cache: dict, model=None) -> dict:
     found_names = set()
     for cache_key, pytensor_var in cache.items():
         symbol_name = cache_key[0]
-        model_var = getattr(pymc_model, symbol_name, None)
+        model_var = _model_var(pymc_model, symbol_name)
         if model_var is not None:
             found_names.add(symbol_name)
             sub_dict[pytensor_var] = model_var
@@ -84,7 +94,7 @@ def _resolve_model_value(model_value: str | TensorVariable, model: Model) -> Ten
     if isinstance(model_value, TensorVariable):
         return model_value
     if isinstance(model_value, str):
-        result = getattr(model, model_value, None)
+        result = _model_var(model, model_value)
         if result is None:
             raise AttributeError(
                 f"Variable '{model_value}' not found in the PyMC model. Available variables: {sorted(model.named_vars)}"

@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -170,6 +172,21 @@ def test_logical_not():
     assert_graph_equal(result, pt.invert(p_pt))
 
 
+@pytest.mark.parametrize(
+    "f_sp, f_py",
+    [(sp.And, all), (sp.Or, any), (sp.Xor, lambda values: sum(values) % 2 == 1)],
+    ids=["And", "Or", "Xor"],
+)
+def test_logical_variadic(f_sp, f_py):
+    p, q, r = sp.symbols("p q r")
+    cache = {}
+    result = as_tensor(f_sp(p, q, r), cache=cache, dtypes={p: "bool", q: "bool", r: "bool"})
+    p_pt, q_pt, r_pt = get_pt_vars(cache, ["p", "q", "r"])
+
+    for values in itertools.product([False, True], repeat=3):
+        assert result.eval(dict(zip([p_pt, q_pt, r_pt], values, strict=True))) == f_py(values), values
+
+
 def test_logical_xor():
     p, q = sp.symbols("p q")
     cache = {}
@@ -340,10 +357,11 @@ def test_emptyPrinter_passthrough():
     assert printer.emptyPrinter(sentinel) is sentinel
 
 
-def test_large_integer():
-    big = sp.Integer(10**100)
-    result = as_tensor(big)
-    assert result == 10**100
+def test_integer_beyond_int64_prints_into_graph():
+    cache = {}
+    result = as_tensor(x + sp.Integer(10**100), cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_allclose(result.eval({x_pt: 1.0}), 1e100)
 
 
 def test_nested_piecewise():
@@ -361,7 +379,6 @@ def test_piecewise_single_true():
     cache = {}
     result = as_tensor(expr, cache=cache)
     x_pt = get_pt_vars(cache, "x")
-    # True is printed as 1 (an int), so switch(1, x**2, nan) — evaluates to x**2
     assert_allclose(result.eval({x_pt: 3.0}), 9.0)
 
 
@@ -369,3 +386,40 @@ def test_complex_dtype_propagation():
     cache = {}
     result = as_tensor(sp.sin(x), cache=cache, dtypes={x: "complex64"})
     assert result.type.dtype == "complex64"
+
+
+def test_integer_base_negative_power_is_reciprocal():
+    n = sp.Symbol("n")
+    cache = {}
+    result = as_tensor(1 / n, cache=cache, dtypes={n: "int64"})
+    n_pt = get_pt_vars(cache, "n")
+    assert_allclose(result.eval({n_pt: 4}), 0.25)
+
+
+def test_integer_base_nonnegative_power_stays_integer():
+    n = sp.Symbol("n")
+    result = as_tensor(n**2, cache={}, dtypes={n: "int64"})
+    assert result.dtype == "int64"
+
+
+def test_AppliedUndef_name_includes_every_argument():
+    f = sp.Function("f")
+    cache = {}
+    as_tensor(f(x, y) + f(x, z), cache=cache)
+    assert sorted(key[0] for key in cache) == ["f_x_y", "f_x_z"]
+
+
+def test_piecewise_without_fallback_is_nan_where_no_condition_holds():
+    expr = sp.Piecewise((x, x > 0), (-x, x < -1))
+    cache = {}
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_allclose([result.eval({x_pt: value}) for value in (2.0, -3.0, -0.5)], [2.0, 3.0, np.nan])
+
+
+def test_piecewise_false_condition_is_dropped():
+    expr = sp.Piecewise((y, sp.false), (x, x > 0), (0, True), evaluate=False)
+    cache = {}
+    result = as_tensor(expr, cache=cache)
+    x_pt = get_pt_vars(cache, "x")
+    assert_graph_equal(result, pt.switch(x_pt > 0, x_pt, 0))

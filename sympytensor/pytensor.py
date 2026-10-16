@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from functools import partial, reduce
+from functools import reduce
 from typing import Any
 
 import numpy as np
@@ -9,6 +9,7 @@ import sympy as sp
 from pytensor import config
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse.variable import SparseVariable
+from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.variable import TensorVariable
 from sympy.printing.printer import Printer
 
@@ -45,17 +46,13 @@ mapping = {
     sp.erf: pt.erf,
     sp.gamma: pt.gamma,
     sp.loggamma: pt.gammaln,
-    sp.Pow: pt.pow,
     sp.Eq: pt.eq,
     sp.Ne: pt.neq,
     sp.StrictGreaterThan: pt.gt,
     sp.StrictLessThan: pt.lt,
     sp.LessThan: pt.le,
     sp.GreaterThan: pt.ge,
-    sp.And: pt.bitwise_and,  # bitwise
-    sp.Or: pt.bitwise_or,  # bitwise
     sp.Not: pt.invert,  # bitwise
-    sp.Xor: pt.bitwise_xor,  # bitwise
     sp.conjugate: pt.conj,
     # Matrices
     sp.MatAdd: pt.add,
@@ -65,6 +62,8 @@ mapping = {
     sp.Transpose: pt.matrix_transpose,
     # sp.Inverse is handled by _print_Inverse; it subclasses sp.MatPow and must not reach this mapping.
 }
+
+_INT64_INFO = np.iinfo(np.int64)
 
 
 def dod_to_csr(dod: dict[int, dict[int, Any]], shape: tuple[int, int]) -> tuple[list, list[int], list[int]]:
@@ -221,6 +220,43 @@ def _matrix_dtype(
     return np.result_type(*dtypes).name
 
 
+def _matrix_chain_splits(dims: list[int]) -> list[list[int]]:
+    """Optimal split points for multiplying a chain of matrices, by the standard dynamic program.
+
+    Parameters
+    ----------
+    dims : list of int
+        Chain dimensions: matrix ``k`` has shape ``(dims[k], dims[k + 1])``.
+
+    Returns
+    -------
+    splits : list of list of int
+        ``splits[i][j]`` is the index ``k`` at which the product of matrices ``i..j`` is cheapest to divide into
+        ``(i..k) @ (k+1..j)``.  Ties go to the largest ``k``, so equal costs keep the left-to-right order.
+    """
+    n_matrices = len(dims) - 1
+    cost = [[0] * n_matrices for _ in range(n_matrices)]
+    splits = [[0] * n_matrices for _ in range(n_matrices)]
+
+    for length in range(1, n_matrices):
+        for i in range(n_matrices - length):
+            j = i + length
+            split_costs = {k: cost[i][k] + cost[k + 1][j] + dims[i] * dims[k + 1] * dims[j + 1] for k in range(i, j)}
+            best_split = min(reversed(split_costs), key=split_costs.__getitem__)
+            cost[i][j] = split_costs[best_split]
+            splits[i][j] = best_split
+
+    return splits
+
+
+def _multiply_chain(operands: list[TensorVariable], splits: list[list[int]], i: int, j: int) -> TensorVariable:
+    if i == j:
+        return operands[i]
+
+    k = splits[i][j]
+    return pt.dot(_multiply_chain(operands, splits, i, k), _multiply_chain(operands, splits, k + 1, j))
+
+
 _MISSING = object()
 
 
@@ -250,9 +286,9 @@ class PytensorPrinter(Printer):
         cache = kwargs.pop("cache", None)
         self.cache = global_cache if cache is None else cache
 
-        # Index range guards are memoized apart from `cache`, whose keys are 5-tuples that consumers unpack
-        # positionally and whose size is part of the public contract. `_printed` already dedupes guards within
-        # one context, so this keeps a single guard per index across contexts and when memoization is off.
+        # Index range guards are memoized apart from `cache`, whose keys consumers read positionally and whose
+        # size is part of the public contract. `_printed` already dedupes guards within one context, so this keeps
+        # a single guard per index across contexts and when memoization is off.
         self._range_checks = {}
 
         # Without this memo a subexpression that recurs, as inlined definitions do, is printed once per
@@ -271,7 +307,9 @@ class PytensorPrinter(Printer):
         # This fast path subsumes a `_print_Integer` method: every `sp.Integer` is intercepted here before
         # dispatch can reach one.
         if isinstance(expr, sp.Integer):
-            return expr.p
+            # PyTensor cannot hold an integer constant wider than int64. A plain float would be autocast to
+            # float32 first, which overflows for most such values.
+            return expr.p if _INT64_INFO.min <= expr.p <= _INT64_INFO.max else np.float64(expr.p)
 
         if not isinstance(expr, sp.Basic):
             return super()._print(expr, **kwargs)
@@ -351,7 +389,8 @@ class PytensorPrinter(Printer):
 
         - It is derived from the object's *value*, never its identity.  Equal-but-distinct SymPy objects
           must share one cache entry, or a symbol printed twice becomes two PyTensor variables and
-          :func:`pytensor_function` rejects its own inputs as unused.
+          :func:`pytensor_function` rejects its own inputs as unused.  Unequal objects must not share one:
+          a :class:`~sympy.Dummy` differs from every other Dummy of the same name by its ``dummy_index``.
         - ``key[0]`` is the name: :mod:`sympytensor.pymc` matches cached variables to model variables on it.
 
         Nothing else may be stored in :attr:`cache` either -- several tests assert an exact ``len(cache)``,
@@ -371,12 +410,13 @@ class PytensorPrinter(Printer):
         Returns
         -------
         key : tuple
-            ``(name, type, args, dtype, shape)`` -- the name first, since that is what callers match on.
+            ``(name, type, args, dtype, shape, dummy_index)`` -- the name first, since that is what callers match
+            on.  ``dummy_index`` is ``None`` for anything but a :class:`~sympy.Dummy`.
         """
         if name is None:
             name = symbol.name
 
-        return name, type(symbol), symbol.args, dtype, shape
+        return name, type(symbol), symbol.args, dtype, shape, getattr(symbol, "dummy_index", None)
 
     def _get_or_create(
         self,
@@ -414,7 +454,7 @@ class PytensorPrinter(Printer):
         return self._get_or_create(symbol, dtype=dtype, shape=broadcastable)
 
     def _print_AppliedUndef(self, applied, **kwargs):
-        name = str(type(applied)) + "_" + str(applied.args[0])
+        name = "_".join([str(type(applied)), *map(str, applied.args)])
         dtype = kwargs.get("dtypes", {}).get(applied)
         broadcastable = kwargs.get("broadcastables", {}).get(applied)
         return self._get_or_create(applied, name=name, dtype=dtype, shape=broadcastable)
@@ -438,11 +478,31 @@ class PytensorPrinter(Printer):
         """
         return reduce(op, [self._print(arg, **kwargs) for arg in expr.args])
 
+    def _print_And(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_and, expr, **kwargs)
+
+    def _print_Or(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_or, expr, **kwargs)
+
+    def _print_Xor(self, expr, **kwargs):
+        return self._fold_binary(pt.bitwise_xor, expr, **kwargs)
+
     def _print_Max(self, expr, **kwargs):
         return self._fold_binary(pt.maximum, expr, **kwargs)
 
     def _print_Min(self, expr, **kwargs):
         return self._fold_binary(pt.minimum, expr, **kwargs)
+
+    def _print_Pow(self, expr, **kwargs):
+        base = pt.as_tensor_variable(self._print(expr.base, **kwargs))
+        exponent = pt.as_tensor_variable(self._print(expr.exp, **kwargs))
+
+        # Integer arithmetic truncates a negative power to zero, where SymPy means the reciprocal.
+        integer_operands = base.dtype in integer_dtypes and exponent.dtype in integer_dtypes
+        if integer_operands and not expr.exp.is_nonnegative:
+            base = pt.cast(base, config.floatX)
+
+        return pt.pow(base, exponent)
 
     def _print_MatrixSymbol(self, X, **kwargs):
         dtype = kwargs.get("dtypes", {}).get(X)
@@ -669,7 +729,19 @@ class PytensorPrinter(Printer):
         return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
-        return self._fold_binary(pt.dot, expr, **kwargs)
+        """Multiply the matrix factors in the cheapest order when every dimension is static."""
+        # PyTensor does not reorder a chain of dots, so a left fold of ``A @ B @ v`` would form ``A @ B`` first.
+        matrices = [arg for arg in expr.args if arg.is_Matrix]
+        coefficients = [self._print(arg, **kwargs) for arg in expr.args if not arg.is_Matrix]
+        operands = [self._print(matrix, **kwargs) for matrix in matrices]
+
+        dims = [_static_dim(matrices[0].shape[0]), *(_static_dim(matrix.shape[1]) for matrix in matrices)]
+        if None in dims:
+            product = reduce(pt.dot, operands)
+        else:
+            product = _multiply_chain(operands, _matrix_chain_splits(dims), 0, len(operands) - 1)
+
+        return pt.mul(*coefficients, product) if coefficients else product
 
     def _print_Inverse(self, expr, **kwargs):
         # sp.Inverse subclasses sp.MatPow, so without this override the MRO would
@@ -700,20 +772,15 @@ class PytensorPrinter(Printer):
         )
 
     def _print_Piecewise(self, expr, **kwargs):
-        e, cond = expr.args[0].args  # First condition and corresponding value
-
-        # Print conditional expression and value for first condition
-        p_cond = self._print(cond, **kwargs)
-        p_e = self._print(e, **kwargs)
-
-        # One condition only
-        if len(expr.args) == 1:
-            # Return value if condition else NaN
-            return pt.switch(p_cond, p_e, np.nan)
-
-        # Return value_1 if condition_1 else evaluate remaining conditions
-        p_remaining = self._print(sp.Piecewise(*expr.args[1:]), **kwargs)
-        return pt.switch(p_cond, p_e, p_remaining)
+        # Built from the last piece outward: rebuilding a Piecewise from the remaining pieces at each level would
+        # re-run SymPy's canonicalization once per piece. NaN covers inputs that no condition matches.
+        result = np.nan
+        for value, condition in reversed(expr.args):
+            if condition is sp.true:
+                result = self._print(value, **kwargs)
+            elif condition is not sp.false:
+                result = pt.switch(self._print(condition, **kwargs), self._print(value, **kwargs), result)
+        return result
 
     def _print_factorial(self, expr, **kwargs):
         return self._print(sp.gamma(expr.args[0] + 1), **kwargs)
@@ -760,6 +827,15 @@ class PytensorPrinter(Printer):
         result : TensorVariable
             A variable corresponding to the expression's value in a PyTensor symbolic expression graph.
         """
+        return self._doprint_each([expr], dtypes=dtypes, broadcastables=broadcastables)[0]
+
+    def _doprint_each(
+        self,
+        exprs: Iterable[sp.Basic],
+        dtypes: dict[sp.Symbol, str] | None = None,
+        broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
+    ) -> list[Any]:
+        """Print several expressions under one context, so the context maps are frozen once for all of them."""
         if dtypes is None:
             dtypes = {}
         if broadcastables is None:
@@ -777,7 +853,7 @@ class PytensorPrinter(Printer):
         self._frozen_context = frozen_context
         self._context = {"dtypes": dtypes, "broadcastables": broadcastables}
 
-        return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
+        return [self._print(expr, dtypes=dtypes, broadcastables=broadcastables) for expr in exprs]
 
 
 global_cache: dict[Any, Any] = {}
@@ -918,9 +994,8 @@ def pytensor_function(
 
     # One printer for every expression, so subexpressions shared between outputs are printed once.
     printer = PytensorPrinter(cache=cache, settings={})
-    code = partial(printer.doprint, dtypes=dtypes, broadcastables=broadcastables)
-    tinputs = list(map(code, inputs))
-    toutputs = list(map(code, outputs))
+    printed = printer._doprint_each([*inputs, *outputs], dtypes=dtypes, broadcastables=broadcastables)
+    tinputs, toutputs = printed[: len(inputs)], printed[len(inputs) :]
 
     toutputs = [
         output if isinstance(output, pytensor.graph.basic.Variable) else pt.as_tensor_variable(output)

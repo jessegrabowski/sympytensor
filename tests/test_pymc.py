@@ -266,3 +266,15 @@ def test_replacements_raises_invalid_value_type():
         pm.Normal("x")
         with pytest.raises(TypeError, match="Replacement values must be"):
             SympyDeterministic("y", x + 1, replacements={"x": 42})
+
+
+def test_match_cache_to_rvs_symbol_named_like_model_attribute():
+    name_sp = sp.Symbol("name")
+
+    with pm.Model(name="m"):
+        name_pm = pm.Normal("name")
+        cache = {}
+        as_tensor(name_sp + 1, cache=cache)
+        sub_dict = _match_cache_to_rvs(cache)
+
+    assert list(sub_dict.values()) == [name_pm]
