@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from functools import partial, reduce
+from functools import reduce
 from typing import Any
 
 import numpy as np
@@ -778,6 +778,15 @@ class PytensorPrinter(Printer):
         result : TensorVariable
             A variable corresponding to the expression's value in a PyTensor symbolic expression graph.
         """
+        return self._doprint_each([expr], dtypes=dtypes, broadcastables=broadcastables)[0]
+
+    def _doprint_each(
+        self,
+        exprs: Iterable[sp.Basic],
+        dtypes: dict[sp.Symbol, str] | None = None,
+        broadcastables: dict[sp.Symbol, tuple[bool, ...]] | None = None,
+    ) -> list[Any]:
+        """Print several expressions under one context, so the context maps are frozen once for all of them."""
         if dtypes is None:
             dtypes = {}
         if broadcastables is None:
@@ -795,7 +804,7 @@ class PytensorPrinter(Printer):
         self._frozen_context = frozen_context
         self._context = {"dtypes": dtypes, "broadcastables": broadcastables}
 
-        return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
+        return [self._print(expr, dtypes=dtypes, broadcastables=broadcastables) for expr in exprs]
 
 
 global_cache: dict[Any, Any] = {}
@@ -936,9 +945,8 @@ def pytensor_function(
 
     # One printer for every expression, so subexpressions shared between outputs are printed once.
     printer = PytensorPrinter(cache=cache, settings={})
-    code = partial(printer.doprint, dtypes=dtypes, broadcastables=broadcastables)
-    tinputs = list(map(code, inputs))
-    toutputs = list(map(code, outputs))
+    printed = printer._doprint_each([*inputs, *outputs], dtypes=dtypes, broadcastables=broadcastables)
+    tinputs, toutputs = printed[: len(inputs)], printed[len(inputs) :]
 
     toutputs = [
         output if isinstance(output, pytensor.graph.basic.Variable) else pt.as_tensor_variable(output)
