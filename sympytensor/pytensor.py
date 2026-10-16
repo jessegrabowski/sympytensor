@@ -220,6 +220,43 @@ def _matrix_dtype(
     return np.result_type(*dtypes).name
 
 
+def _matrix_chain_splits(dims: list[int]) -> list[list[int]]:
+    """Optimal split points for multiplying a chain of matrices, by the standard dynamic program.
+
+    Parameters
+    ----------
+    dims : list of int
+        Chain dimensions: matrix ``k`` has shape ``(dims[k], dims[k + 1])``.
+
+    Returns
+    -------
+    splits : list of list of int
+        ``splits[i][j]`` is the index ``k`` at which the product of matrices ``i..j`` is cheapest to divide into
+        ``(i..k) @ (k+1..j)``.  Ties go to the largest ``k``, so equal costs keep the left-to-right order.
+    """
+    n_matrices = len(dims) - 1
+    cost = [[0] * n_matrices for _ in range(n_matrices)]
+    splits = [[0] * n_matrices for _ in range(n_matrices)]
+
+    for length in range(1, n_matrices):
+        for i in range(n_matrices - length):
+            j = i + length
+            split_costs = {k: cost[i][k] + cost[k + 1][j] + dims[i] * dims[k + 1] * dims[j + 1] for k in range(i, j)}
+            best_split = min(reversed(split_costs), key=split_costs.__getitem__)
+            cost[i][j] = split_costs[best_split]
+            splits[i][j] = best_split
+
+    return splits
+
+
+def _multiply_chain(operands: list[TensorVariable], splits: list[list[int]], i: int, j: int) -> TensorVariable:
+    if i == j:
+        return operands[i]
+
+    k = splits[i][j]
+    return pt.dot(_multiply_chain(operands, splits, i, k), _multiply_chain(operands, splits, k + 1, j))
+
+
 _MISSING = object()
 
 
@@ -692,7 +729,19 @@ class PytensorPrinter(Printer):
         return self._print_reduction(X, op="prod", **kwargs)
 
     def _print_MatMul(self, expr, **kwargs):
-        return self._fold_binary(pt.dot, expr, **kwargs)
+        """Multiply the matrix factors in the cheapest order when every dimension is static."""
+        # PyTensor does not reorder a chain of dots, so a left fold of ``A @ B @ v`` would form ``A @ B`` first.
+        matrices = [arg for arg in expr.args if arg.is_Matrix]
+        coefficients = [self._print(arg, **kwargs) for arg in expr.args if not arg.is_Matrix]
+        operands = [self._print(matrix, **kwargs) for matrix in matrices]
+
+        dims = [_static_dim(matrices[0].shape[0]), *(_static_dim(matrix.shape[1]) for matrix in matrices)]
+        if None in dims:
+            product = reduce(pt.dot, operands)
+        else:
+            product = _multiply_chain(operands, _matrix_chain_splits(dims), 0, len(operands) - 1)
+
+        return pt.mul(*coefficients, product) if coefficients else product
 
     def _print_Inverse(self, expr, **kwargs):
         # sp.Inverse subclasses sp.MatPow, so without this override the MRO would

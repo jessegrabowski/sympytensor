@@ -42,7 +42,35 @@ def test_MatMul():
     cache = {}
     expr_pt = as_tensor(X * Y * Z, cache=cache)
     X_pt, Y_pt, Z_pt = get_pt_vars(cache, ["X", "Y", "Z"])
-    assert_graph_equal(expr_pt, pt.dot(pt.dot(X_pt, Y_pt), Z_pt))
+    values = [np.arange(16.0).reshape(4, 4) + scale for scale in (1, 2, 3)]
+    assert_allclose(expr_pt.eval(dict(zip([X_pt, Y_pt, Z_pt], values, strict=True))), values[0] @ values[1] @ values[2])
+
+
+def test_MatMul_multiplies_vector_first():
+    A, B = sp.MatrixSymbol("A", 5, 5), sp.MatrixSymbol("B", 5, 5)
+    w = sp.MatrixSymbol("w", 5, 1)
+    cache = {}
+    expr_pt = as_tensor(A * B * w, cache=cache)
+    A_pt, B_pt, w_pt = get_pt_vars(cache, ["A", "B", "w"])
+    assert_graph_equal(expr_pt, pt.dot(A_pt, pt.dot(B_pt, w_pt)))
+
+
+def test_MatMul_with_symbolic_dimension_folds_left():
+    n = sp.Symbol("n", integer=True, positive=True)
+    A, B = sp.MatrixSymbol("A", n, n), sp.MatrixSymbol("B", n, n)
+    w = sp.MatrixSymbol("w", n, 1)
+    cache = {}
+    expr_pt = as_tensor(A * B * w, cache=cache)
+    A_pt, B_pt, w_pt = get_pt_vars(cache, ["A", "B", "w"])
+    assert_graph_equal(expr_pt, pt.dot(pt.dot(A_pt, B_pt), w_pt))
+
+
+def test_MatMul_with_scalar_coefficient():
+    cache = {}
+    expr_pt = as_tensor(2 * X * Y, cache=cache)
+    X_pt, Y_pt = get_pt_vars(cache, ["X", "Y"])
+    values = [np.arange(16.0).reshape(4, 4) + scale for scale in (1, 2)]
+    assert_allclose(expr_pt.eval(dict(zip([X_pt, Y_pt], values, strict=True))), 2 * values[0] @ values[1])
 
 
 def test_Transpose():
